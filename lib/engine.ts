@@ -185,7 +185,10 @@ async function stVision(run: Run) {
     if (!r.ok) {
       await q(`UPDATE pages SET flags=array_append(flags,'vision_failed'), model=$3, ms=ms+$4, cost_usd=cost_usd+$5 WHERE document_id=$1 AND n=$2`,
         [run.document_id, n, r.model, r.ms, r.costUsd]);
-      await warn(run.document_id, "VISION_FAILED", `page ${n}: model output failed validation after retry+escalation`, n);
+      const code = /content_filter/.test(r.error ?? "") ? "CONTENT_FILTER" : "VISION_FAILED";
+      await warn(run.document_id, code, code === "CONTENT_FILTER"
+        ? `page ${n}: provider content filter refused verbatim transcription; page kept as image only`
+        : `page ${n}: model output failed validation after retry+escalation`, n);
       return;
     }
     const [{ width, height }] = await q(`SELECT width, height FROM pages WHERE document_id=$1 AND n=$2`, [run.document_id, n]);
@@ -196,7 +199,7 @@ async function stVision(run: Run) {
       const bbox = { x: b.bbox.x * (width || 1), y: b.bbox.y * (height || 1), w: b.bbox.w * (width || 1), h: b.bbox.h * (height || 1) };
       await q(`INSERT INTO blocks (id, document_id, page_n, order_index, bbox, text, role, heading_level, source, bbox_source)
                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'vision','asserted')`,
-        [id("blk"), run.document_id, n, i++, JSON.stringify(bbox), b.text, b.role, b.role === "heading" ? b.heading_level : null]);
+        [id("blk"), run.document_id, n, i++, JSON.stringify(bbox), b.text, b.role, b.role === "heading" ? Math.min(Math.max(b.heading_level ?? 2, 1), 4) : null]);
     }
     for (const f of r.data.figures ?? [])
       await q(`INSERT INTO elements (id, document_id, page_n, type, bbox, caption, description) VALUES ($1,$2,$3,'figure',$4,$5,$6)`,
@@ -205,7 +208,7 @@ async function stVision(run: Run) {
       await q(`INSERT INTO elements (id, document_id, page_n, type, bbox, caption, grid, status) VALUES ($1,$2,$3,'table',$4,$5,$6,$7)`,
         [id("tbl"), run.document_id, n, JSON.stringify(t.bbox), t.caption,
          JSON.stringify({ columns: t.columns, rows: t.rows }), t.extraction_ok ? "ok" : "table_extraction_failed"]);
-    if ((r.data.confidence ?? 1) < 0.5)
+    if (Math.min(Math.max(r.data.confidence ?? 1, 0), 1) < 0.5)
       await warn(run.document_id, "LOW_CONFIDENCE", `page ${n}: model self-reported ${r.data.confidence} — ${String(r.data.notes).slice(0, 140)}`, n);
     await q(`UPDATE pages SET model=$3, ms=ms+$4, cost_usd=cost_usd+$5 WHERE document_id=$1 AND n=$2`,
       [run.document_id, n, r.model, r.ms, r.costUsd]);
@@ -267,6 +270,10 @@ async function stStructure(run: Run) {
   const vh = await q(`SELECT page_n, order_index, text, heading_level FROM blocks WHERE document_id=$1 AND source='vision' AND role IN ('heading','title') ORDER BY page_n, order_index`, [docId]);
   for (const v of vh) cands.push({ page: v.page_n, lineIdx: v.order_index, text: v.text, size: 0, bold: false, numbered: false, level: v.heading_level ?? 2, confidence: 0.6, src: "vision" as any });
   cands.sort((a, b) => a.page - b.page || a.lineIdx - b.lineIdx);
+  // the document title is not a section: drop a page-1 candidate that IS the biggest page-1 line
+  const p1 = pls.find(p => p.n === 1);
+  const biggest = p1?.lines.slice().sort((a, b) => b.fontSize - a.fontSize)[0]?.text?.trim();
+  if (biggest && cands.length && cands[0].page === 1 && cands[0].text.trim() === biggest) cands.shift();
   for (const w of sanityCheck(cands as any)) await warn(docId, "HEADING_SANITY", w);
 
   // outline prior

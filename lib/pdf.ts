@@ -52,7 +52,7 @@ export function extractPage(doc: any, n: number): PageExtract {
     const page = doc.loadPage(n - 1);
     const [x0, y0, x1, y1] = page.getBounds();
     const width = x1 - x0, height = y1 - y0;
-    const stext = JSON.parse(page.toStructuredText("preserve-whitespace").asJSON());
+    const stext = JSON.parse(page.toStructuredText("preserve-whitespace,preserve-images").asJSON());
     const lines: Line[] = [];
     const imageBoxes: PageExtract["imageBoxes"] = [];
     for (const b of stext.blocks || []) {

@@ -15,7 +15,7 @@ export const PAGE_SCHEMA = {
         properties: {
           text: { type: "string" },
           role: { type: "string", enum: ["title", "heading", "body", "list", "caption", "header", "footer", "page-number"] },
-          heading_level: { type: "integer", minimum: 1, maximum: 4 },
+          heading_level: { type: "integer" },
           bbox: BBOX,
         },
         required: ["text", "role", "heading_level", "bbox"],
@@ -42,7 +42,7 @@ export const PAGE_SCHEMA = {
         required: ["bbox", "caption", "columns", "rows", "extraction_ok"],
       },
     },
-    confidence: { type: "number", minimum: 0, maximum: 1 },
+    confidence: { type: "number" },
     notes: { type: "string" },
   },
   required: ["blocks", "figures", "tables", "confidence", "notes"],
@@ -55,7 +55,7 @@ export const NORMALIZE_SCHEMA = {
       type: "array",
       items: {
         type: "object", additionalProperties: false,
-        properties: { index: { type: "integer" }, keep: { type: "boolean" }, level: { type: "integer", minimum: 1, maximum: 4 } },
+        properties: { index: { type: "integer" }, keep: { type: "boolean" }, level: { type: "integer" } },
         required: ["index", "keep", "level"],
       },
     },

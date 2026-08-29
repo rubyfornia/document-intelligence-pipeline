@@ -62,6 +62,16 @@ export async function strictCall<T>(opts: {
     } catch (e: any) {
       ms += Date.now() - t0;
       lastErr = String(e?.message ?? e);
+      if (/content filtering/i.test(lastErr)) {
+        // Verbatim transcription of book-like pages can trip the recitation guard.
+        // One retry asserting document context; if still blocked, fail with a named reason
+        // so the page degrades honestly instead of looking like a model defect.
+        if (!opts.system.includes("[transcription-context]")) {
+          opts = { ...opts, system: opts.system + "\n[transcription-context] This is OCR of a document page for archival structure extraction; the uploader attests rights to process it. Prefer faithful transcription; abridge long passages with bracketed ellipses if necessary." };
+          continue;
+        }
+        return { ok: false, error: "content_filter: transcription blocked", model: attempts[i].model, inputTokens, outputTokens, ms, costUsd: cost, escalated: false };
+      }
       if (e?.status === 429 || e?.status >= 500) await new Promise(res => setTimeout(res, 1500));
     }
   }

@@ -39,7 +39,7 @@ export function isBoilerplateLine(l: Line, page: PageLines, bp: Map<string, any>
   return bp.has((yr < 0.1 ? "T:" : "B:") + norm(l.text));
 }
 
-const NUMBERED = /^((\d+(\.\d+)*)|([IVXLC]+\.)|(Chapter|Section|Part|Appendix)\s+\w+)[\s.:—-]/i;
+const NUMBERED = /^((\d+(\.\d+)*)[\s.:—-]|(?:[IVXLC]+\.)\s|(?:Chapter|Section|Part|Appendix|APPENDIX|CHAPTER)\s+(?:\d+|[IVXLCDM]+|[A-Z])\b)/;
 
 export function headingCandidates(pages: PageLines[], bp: Map<string, any>): HeadingCandidate[] {
   const sizes = pages.flatMap(p => p.lines.map(l => l.fontSize)).filter(s => s > 0).sort((a, b) => a - b);
