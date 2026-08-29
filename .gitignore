@@ -18,3 +18,4 @@ corpus/local/
 # OS noise
 .DS_Store
 .test-build/
+.vercel

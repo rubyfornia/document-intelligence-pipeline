@@ -12,8 +12,8 @@ import { PAGE_SCHEMA, NORMALIZE_SCHEMA, SUMMARY_SCHEMA } from "./schemas";
 
 const VISION_BUDGET = 150;           // max multimodal calls per document
 const SAMPLER_K = 5;                 // clean pages cross-checked per document
-const EXTRACT_BATCH = 10;
-const VISION_CONCURRENCY = 3;
+const EXTRACT_BATCH = 6;
+const VISION_CONCURRENCY = 2;
 
 interface Run { id: string; document_id: string; status: string; stage: string; cursor: any }
 
@@ -104,6 +104,7 @@ async function stExtract(run: Run) {
       [run.document_id, total, JSON.stringify({ ...meta, outline_present: docOutline(doc).length > 0 })]);
   }
   const to = Math.min(from + EXTRACT_BATCH - 1, total);
+  await q(`DELETE FROM blocks WHERE document_id=$1 AND page_n BETWEEN $2 AND $3`, [run.document_id, from, to]);
   for (let n = from; n <= to; n++) {
     const p = extractPage(doc, n);
     await q(`INSERT INTO pages (document_id, n, width, height, signals) VALUES ($1,$2,$3,$4,$5)
@@ -114,12 +115,15 @@ async function stExtract(run: Run) {
         [run.document_id, n, `extractor error: ${p.error.slice(0, 120)}`]);
       continue;
     }
-    let i = 0;
-    for (const l of p.lines) {
-      await q(
-        `INSERT INTO blocks (id, document_id, page_n, order_index, bbox, text, font_size, font_name, is_bold)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-        [id("blk"), run.document_id, n, i++, JSON.stringify(l.bbox), l.text, l.fontSize, l.fontName, l.bold]);
+    if (p.lines.length) {
+      // one multi-row insert per page — per-line round-trips are fatal at cloud DB latency
+      const cols = 9; const vals: any[] = []; const tuples: string[] = [];
+      p.lines.forEach((l, i) => {
+        const o = i * cols;
+        tuples.push(`($${o+1},$${o+2},$${o+3},$${o+4},$${o+5},$${o+6},$${o+7},$${o+8},$${o+9})`);
+        vals.push(id("blk"), run.document_id, n, i, JSON.stringify(l.bbox), l.text, l.fontSize, l.fontName, l.bold);
+      });
+      await q(`INSERT INTO blocks (id, document_id, page_n, order_index, bbox, text, font_size, font_name, is_bold) VALUES ${tuples.join(",")}`, vals);
     }
   }
   await ev(run, "extract", { note: `pages ${from}–${to} of ${total}`, ms: Date.now() - t0 });
@@ -259,11 +263,10 @@ async function stStructure(run: Run) {
   const bp = detectBoilerplate(pls);
   for (const [, v] of bp)
     await q(`INSERT INTO boilerplate (id, document_id, text, pages) VALUES ($1,$2,$3,$4)`, [id("bp"), docId, v.text, v.pages]);
-  // mark boilerplate blocks
-  for (const p of pls)
-    for (const l of p.lines)
-      if (isBoilerplateLine(l, p, bp))
-        await q(`UPDATE blocks SET boilerplate=true WHERE document_id=$1 AND page_n=$2 AND text=$3`, [docId, p.n, l.text]);
+  // mark boilerplate blocks — one UPDATE per recurring text, not per line
+  const bpTexts = [...new Set([...bp.values()].map(v => v.text))];
+  if (bpTexts.length)
+    await q(`UPDATE blocks SET boilerplate=true WHERE document_id=$1 AND text = ANY($2)`, [docId, bpTexts]);
 
   // candidates: deterministic pages via font logic; vision pages contribute their labeled headings
   const cands = headingCandidates(pls, bp).map(c => ({ ...c, src: "detected" as const }));

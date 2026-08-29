@@ -1,0 +1,7 @@
+_meta
+corpus
+.githooks
+_firewall
+scripts/corpus
+.test-build
+*.log
