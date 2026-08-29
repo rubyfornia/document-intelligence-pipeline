@@ -19,3 +19,5 @@ corpus/local/
 .DS_Store
 .test-build/
 .vercel
+corpus/local/
+*.tsbuildinfo

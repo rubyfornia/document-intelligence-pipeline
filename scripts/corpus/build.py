@@ -36,7 +36,7 @@ def paras(text, start_frac, n):
     return ps[i:i + n]
 
 def styled_doc(path, title, sections, table=None, fig=False, math=False):
-    doc = SimpleDocTemplate(path, pagesize=letter, title=title)
+    doc = SimpleDocTemplate(path, pagesize=letter, title=title, pageCompression=0)
     story = [Paragraph(title, ST["Title"]), Spacer(1, 12)]
     for si, (heading, subs) in enumerate(sections, 1):
         story.append(Paragraph(f"{si}. {heading}", ST["Heading1"]))
@@ -106,13 +106,13 @@ class TwoCol(BaseDocTemplate):
         f1 = Frame(0.8 * inch, 0.8 * inch, w, letter[1] - 1.6 * inch, id="c1")
         f2 = Frame(0.8 * inch + w + 0.4 * inch, 0.8 * inch, w, letter[1] - 1.6 * inch, id="c2")
         self.addPageTemplates([PageTemplate(id="two", frames=[f1, f2])])
-tc = TwoCol(os.path.join(SEED, "seed-02-twocol.pdf"), title="Instrument Notes, Two-Column Digest")
+tc = TwoCol(os.path.join(SEED, "seed-02-twocol.pdf"), title="Instrument Notes, Two-Column Digest", pageCompression=0)
 tcs = [Paragraph("Instrument Notes, Two-Column Digest", ST["Title"])]
 for p in survey_paras(21, 20, "winter"): tcs.append(Paragraph(p, BODY))
 tc.build(tcs)
 
 # 3. slide deck (landscape, big fonts, sparse)
-sd = SimpleDocTemplate(os.path.join(SEED, "seed-03-deck.pdf"), pagesize=landscape(letter), title="Field Survey Briefing")
+sd = SimpleDocTemplate(os.path.join(SEED, "seed-03-deck.pdf"), pagesize=landscape(letter), title="Field Survey Briefing", pageCompression=0)
 big = ParagraphStyle("big", parent=ST["Title"], fontSize=34, leading=40)
 bullet = ParagraphStyle("bl", parent=ST["Normal"], fontSize=20, leading=28, leftIndent=24, bulletIndent=8)
 slides = [("Field Survey Briefing", ["Purpose of the survey", "Regions covered: North, South, East, West", "Methods and instruments"]),
@@ -185,5 +185,10 @@ for pg in r.pages: w.add_page(pg)
 w.encrypt("demo")
 with open(os.path.join(SEED, "seed-09-protected.pdf"), "wb") as f: w.write(f)
 
+# drop the raw source-text caches: they are build inputs only, re-fetched on demand,
+# and a full novel of text is exactly the kind of surface an outbound scan should not
+# have to reason about.
+for f in os.listdir(LOCAL):
+    if f.endswith(".txt"): os.remove(os.path.join(LOCAL, f))
 for f in sorted(os.listdir(SEED)):
     if f.endswith(".pdf"): print(f, os.path.getsize(os.path.join(SEED, f)))
