@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# firewall pre-push — certify WHERE a push lands, before it lands.
+#
+#   git invokes:  pre-push <remote-name> <remote-url>   (ref updates on stdin)
+#   exit:  0 = destination certified · 1 = refused (fail-closed)
+#   env:   FWPUSH_LIST=<path>   override the allowlist (default: <root>/_firewall/remotes.allow)
+#
+# A content check certifies WHAT is in a push. This certifies WHERE it goes. You
+# need both, and this is the half nothing does by default: content that passes
+# every content check, pushed to the wrong repository, is still a leak. git sends
+# whatever `origin` happens to say, wherever it happens to point.
+#
+# WHY THIS EXISTS. A remote is set once and then trusted forever — so a remote set
+# wrong once is wrong on every push after it, silently. The failure that motivated
+# this: a URL pasted in its DISPLAY form, where a rendered ellipsis stands in for
+# an elided path segment. It reads correct to a human. It is not an address. That
+# push was stopped by the string being malformed — by luck. Luck is not a control.
+# This is the control.
+#
+# THIS FILE IS CANONICAL and is vendored byte-identical into every repo it guards
+# — including repos that may be handed to someone outside. It therefore carries no
+# private vocabulary, no corpus inventory, and no incident detail: only the
+# mechanism. Keep it that way. Whatever you are tempted to explain here belongs in
+# your own docs, which do not travel with this file.
+#
+# Fail-closed by construction: the ONLY exit-0 path is "an allowlist exists, is
+# non-empty, the destination is printable ASCII, and it matches an entry EXACTLY."
+# Matching is exact on purpose — no normalization, no fuzzy match. A false refusal
+# costs one deliberate allowlist line; a false accept is the leak.
+set -euo pipefail
+
+remote_name="${1:-}"
+remote_url="${2:-}"
+
+refuse() {
+  local headline="$1"; shift
+  {
+    echo ""
+    echo "✗ FAIL-CLOSED (pre-push): $headline"
+    local line
+    for line in "$@"; do echo "  $line"; done
+    echo ""
+    echo "  PUSH REFUSED. scan.sh certifies the payload; this certifies the"
+    echo "  destination. Fix the remote, or add the destination to the allowlist"
+    echo "  — deliberately, by typing the URL in full. Never paste an elided one."
+  } >&2
+  exit 1
+}
+
+root="$(git rev-parse --show-toplevel 2>/dev/null)" \
+  || refuse "cannot resolve the repo root — refusing to vouch for this destination."
+list="${FWPUSH_LIST:-$root/_firewall/remotes.allow}"
+
+[[ -n "$remote_url" ]] \
+  || refuse "git supplied no destination URL — cannot certify where this lands."
+
+[[ -f "$list" ]] \
+  || refuse "no remote allowlist at $list" \
+            "A destination cannot be certified without one. Create it:" \
+            "  echo 'https://github.com/<owner>/<repo>.git' > _firewall/remotes.allow"
+
+entries="$(grep -vE '^[[:space:]]*(#|$)' "$list" || true)"
+[[ -n "$entries" ]] \
+  || refuse "remote allowlist is empty ($list) — nothing to certify against."
+
+# ── Gate 1: the destination must be printable ASCII ──────────────────────────
+# This is the 2026-07-15 signature. An elided URL (…, →, ⋯) carries a multi-byte
+# glyph where a path segment belongs — it is a *rendering* of a URL, not a URL.
+# Caught here by shape, before any allowlist comparison, because the bytes
+# themselves are the tell and the human needs to see them.
+if printf '%s' "$remote_url" | LC_ALL=C grep -q '[^ -~]'; then
+  refuse "destination URL carries non-ASCII bytes — the elided-URL signature." \
+         "remote: $remote_name" \
+         "url:    $remote_url" \
+         "bytes:  $(printf '%s' "$remote_url" | od -An -tx1 | tr -s ' \n' ' ' | sed 's/^ //;s/ $//')" \
+         "" \
+         "A URL was pasted in its DISPLAY form (an ellipsis stands in for the" \
+         "elided part) as though it were live. Type the address in full."
+fi
+
+# ── Gate 2: the destination must be on the allowlist, exactly ────────────────
+matched=0
+while IFS= read -r allowed; do
+  allowed="${allowed#"${allowed%%[![:space:]]*}"}"   # ltrim
+  allowed="${allowed%"${allowed##*[![:space:]]}"}"   # rtrim
+  [[ -n "$allowed" ]] || continue
+  if [[ "$remote_url" == "$allowed" ]]; then matched=1; break; fi
+done <<<"$entries"
+
+if (( ! matched )); then
+  refuse "destination is NOT on the allowlist — refusing to push." \
+         "remote:  $remote_name" \
+         "url:     $remote_url" \
+         "allowed:" \
+         "$(printf '%s\n' "$entries" | sed 's/^[[:space:]]*/           /')" \
+         "" \
+         "If this destination is legitimate, add it to $(basename "$list") as a" \
+         "deliberate, reviewed act — type the URL in full. If it names a repo" \
+         "OTHER than this one, STOP: that is the leak this hook exists to prevent."
+fi
+
+echo "✓ FIREWALL: destination certified — $remote_name → $remote_url" >&2

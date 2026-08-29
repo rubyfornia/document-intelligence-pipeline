@@ -1,0 +1,5 @@
+# Certified push destinations — EXACT full URLs, one per line.
+# Born empty ON PURPOSE: the pre-push hook fails closed on an empty list, so this
+# repo refuses every push until a human certifies a destination by TYPING the URL
+# here in full. Never populate this from `git remote get-url` — that certifies
+# whatever is already configured, including a wrong one.

@@ -1,0 +1,19 @@
+# local working notes — never committed, never part of the deliverable
+_meta/
+
+# dependencies / builds
+node_modules/
+.next/
+.vercel/
+dist/
+
+# environment & secrets
+.env
+.env.*
+*.pem
+
+# local corpus documents not cleared for redistribution (cleared seeds live in seed/)
+corpus/local/
+
+# OS noise
+.DS_Store
