@@ -1,0 +1,72 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  @apply bg-gray-50 text-gray-900 antialiased;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial,
+    sans-serif;
+}
+
+/* Range slider styling (used by the live assumption controls). */
+input[type="range"].lever-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 9999px;
+  background: theme("colors.indigo.100");
+  outline: none;
+}
+input[type="range"].lever-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: theme("colors.indigo.600");
+  border: 2px solid white;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
+  cursor: pointer;
+}
+input[type="range"].lever-range::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border: 2px solid white;
+  border-radius: 9999px;
+  background: theme("colors.indigo.600");
+  cursor: pointer;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@layer components {
+  /* Spreadsheet-like tables — a sticky header row + a sticky, no-wrap first column, so the row labels stay
+     visible when scrolling right and the header stays when scrolling down. Put `.stable` on the scroll
+     container (give it overflow-auto + a max-height); each sticky cell carries its own opaque background. */
+  .stable thead th {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background-color: theme("colors.gray.50");
+    box-shadow: inset 0 -1px 0 theme("colors.gray.200");
+  }
+  .stable tbody td:first-child,
+  .stable tbody th:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 10;
+    white-space: nowrap;
+    box-shadow: inset -1px 0 0 theme("colors.gray.100");
+  }
+  /* Top-left corner cell: freeze in BOTH axes (sticky-top from the rule above + sticky-left here). */
+  .stable thead th:first-child {
+    left: 0;
+    z-index: 30;
+  }
+}
