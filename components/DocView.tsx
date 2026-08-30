@@ -117,7 +117,7 @@ export default function DocView({ id }: { id: string }) {
                   className={clsx("absolute cursor-pointer border-2",
                     e.bbox_source === "measured" ? "border-emerald-500/80" : "border-dashed border-rose-500/80",
                     sel === e.id && "bg-amber-200/30")}
-                  style={boxStyle(e.bbox, pageRow)} title={`${e.type} (${e.bbox_source})`} />
+                  style={boxStyle(e.bbox)} title={`${e.type} (${e.bbox_source ?? "model-asserted"})`} />
               ))}
             </div>
             <div className="mt-2 text-xs text-gray-500">solid <span className="text-emerald-600">green</span> = measured coordinates · dashed <span className="text-rose-600">red</span> = model-asserted (drawn differently on purpose)</div>
@@ -184,15 +184,13 @@ export default function DocView({ id }: { id: string }) {
     </main>
   );
 }
-function boxStyle(bbox: any, pageRow: any) {
-  // element bboxes from vision are stored in page points (converted at ingest)
-  const W = pageRow?.signals?.chars != null ? null : null;
+function boxStyle(bbox: any) {
+  // element bboxes are stored verbatim from vision: fractions of page size in [0,1], origin top-left
+  // (blocks are converted to page points at ingest; elements are not)
   return {
-    left: `${(bbox?.x0 ?? bbox?.x ?? 0) / (pageWidth(pageRow) || 1) * 100}%`,
-    top: `${(bbox?.y0 ?? bbox?.y ?? 0) / (pageHeight(pageRow) || 1) * 100}%`,
-    width: `${(bbox?.w ?? 0) / (pageWidth(pageRow) || 1) * 100}%`,
-    height: `${(bbox?.h ?? 0) / (pageHeight(pageRow) || 1) * 100}%`,
+    left: `${(bbox?.x ?? 0) * 100}%`,
+    top: `${(bbox?.y ?? 0) * 100}%`,
+    width: `${(bbox?.w ?? 0) * 100}%`,
+    height: `${(bbox?.h ?? 0) * 100}%`,
   } as React.CSSProperties;
 }
-const pageWidth = (p: any) => p?.width ?? 612;
-const pageHeight = (p: any) => p?.height ?? 792;
