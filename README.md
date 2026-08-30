@@ -34,7 +34,7 @@ ingest (SHA-256 short-circuit; corrupt/password files refused at the door with t
 extract (text+fonts+boxes, per page) → **triage** (classes: clean A / complex B / scanned C /
 degraded D / slide / blank) → vision path for C, D, and multi-column B (strict-schema extraction;
 reading-order scramble is cheaper to prevent than repair) → **cross-check sampler** (5 clean-looking
-pages get a cheap vision read; disagreement flips the document to `distrust-text` — the one failure
+pages get a cheap vision read; majority disagreement flips the document to `distrust-text` — the one failure
 invisible to every cheap signal is a text layer of plausible garbage) → structure (deterministic
 heading candidates reconciled against the PDF outline where present; recurring headers/footers
 stored as boilerplate, never destroyed; one cheap normalization call over the candidate list) →
@@ -58,7 +58,7 @@ cost/quality control this design exists to demonstrate.
 
 `GET /api/documents/:id/export` returns what a downstream system would be handed: document (title
 with its source, metadata, generated abstract with evidence), section tree (flat rows with
-`parent_id`, each with page range, source `outline|detected|normalized`, confidence), chunks,
+`parent_id`, each with page range, source `outline|detected|vision|fallback`, confidence), chunks,
 elements, per-page ledger rows, boilerplate, warnings.
 
 **Chunks** are contiguous body text of one leaf section, greedy-packed at paragraph boundaries to
