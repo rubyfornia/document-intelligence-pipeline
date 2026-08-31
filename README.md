@@ -128,8 +128,20 @@ user correction of headings/regions feeding back into the representation; per-te
 ```bash
 npm install
 cp .env.example .env.local   # ANTHROPIC_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY, DATABASE_URL
-npm run db:schema
-python3 scripts/corpus/build.py   # rebuild the test corpus (reportlab, pypdf, img2pdf)
-npm run dev                       # then upload from http://localhost:3000
+npm run db:schema                 # create the tables in an empty database
+npm run dev                       # http://localhost:3000 — the library starts empty
+npm run seed -- http://localhost:3000        # upload + process the committed corpus/seed PDFs
+                                  # (the corrupt and password seeds are refused at the door — by design)
 npm test                          # triage + chunker unit tests
+```
+
+The seed PDFs are committed, so a fresh clone boots the full demo corpus with one command;
+`python3 scripts/corpus/build.py` regenerates them from scratch (reportlab, pypdf, img2pdf) if you
+want to rebuild the corpus itself. To add the NIST holdout, download the public PDF (the DOI printed
+on its own cover: https://doi.org/10.6028/NIST.AI.100-1) and pass it to the seed script:
+`npm run seed -- http://localhost:3000 path/to/nist-ai-rmf.pdf`. A fresh boot reproduces the corpus
+and its planted-truth conclusions; the ledgers it writes are its own new measurements — a ledger
+records what ran, so a new run gets new receipts.
+
+```bash
 ```
