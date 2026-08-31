@@ -13,6 +13,17 @@ export default function DocView({ id, initialTab }: { id: string; initialTab?: s
     (TABS as readonly string[]).includes(initialTab ?? "") ? (initialTab as (typeof TABS)[number]) : "Overview");
   const [page, setPage] = useState(1);
   const [sel, setSel] = useState<string | null>(null);
+  const [showBlocks, setShowBlocks] = useState(false);
+  const [pageBlocks, setPageBlocks] = useState<{ width: number; height: number; blocks: any[] } | null>(null);
+
+  useEffect(() => {
+    if (!showBlocks) { setPageBlocks(null); return; }
+    let live = true;
+    fetch(`/api/documents/${id}/page/${page}/blocks`).then(r => r.json())
+      .then(j => { if (live && j.blocks) setPageBlocks(j); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [showBlocks, id, page]);
 
   useEffect(() => {
     let live = true;
@@ -107,12 +118,23 @@ export default function DocView({ id, initialTab }: { id: string; initialTab?: s
             <div className="mb-2 flex items-center justify-between text-sm text-gray-600">
               <button className="rounded border px-2 py-1 disabled:opacity-40" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>←</button>
               <div>page {page} / {d.page_count} · <span className="font-medium">{CLASS_LABELS[pageRow?.class] ?? pageRow?.class}</span>
-                {pageRow?.model ? <span className="text-gray-400"> · {pageRow.model}</span> : null}</div>
+                {pageRow?.model ? <span className="text-gray-400"> · {pageRow.model}</span> : null}
+                <label className="ml-3 cursor-pointer select-none text-xs text-gray-500">
+                  <input type="checkbox" className="mr-1 align-middle" checked={showBlocks} onChange={e => setShowBlocks(e.target.checked)} />
+                  text blocks
+                </label></div>
               <button className="rounded border px-2 py-1 disabled:opacity-40" disabled={page >= d.page_count} onClick={() => setPage(p => p + 1)}>→</button>
             </div>
             <div className="relative overflow-hidden rounded-xl border border-gray-300 bg-white">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={`/api/documents/${id}/page/${page}/image`} alt={`page ${page}`} className="block w-full" />
+              {showBlocks && pageBlocks?.blocks?.map((b: any) => (
+                <div key={b.id}
+                  className={clsx("pointer-events-none absolute border",
+                    b.bbox_source === "measured" ? "border-emerald-500/70" : "border-dashed border-rose-500/70")}
+                  style={blockStyle(b.bbox, pageBlocks.width, pageBlocks.height)}
+                  title={`${b.role ?? "text"} (${b.bbox_source})`} />
+              ))}
               {pageEls.map((e: any) => (
                 <div key={e.id} onClick={() => setSel(e.id)}
                   className={clsx("absolute cursor-pointer border-2",
@@ -193,5 +215,14 @@ function boxStyle(bbox: any) {
     top: `${(bbox?.y ?? 0) * 100}%`,
     width: `${(bbox?.w ?? 0) * 100}%`,
     height: `${(bbox?.h ?? 0) * 100}%`,
+  } as React.CSSProperties;
+}
+function blockStyle(bbox: any, w: number, h: number) {
+  // block bboxes are in page points (deterministic from the content stream; vision converted at ingest)
+  return {
+    left: `${((bbox?.x ?? 0) / (w || 1)) * 100}%`,
+    top: `${((bbox?.y ?? 0) / (h || 1)) * 100}%`,
+    width: `${((bbox?.w ?? 0) / (w || 1)) * 100}%`,
+    height: `${((bbox?.h ?? 0) / (h || 1)) * 100}%`,
   } as React.CSSProperties;
 }
