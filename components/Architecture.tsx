@@ -302,7 +302,7 @@ export default function Architecture() {
           <span><span className="mr-1 rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] text-gray-700">stage</span>= the exact name its ledger rows carry</span>
         </div>
 
-        <div className="mx-auto min-w-[560px] max-w-5xl">
+        <div className="min-w-[560px]">
 
           {/* 1 · ingest + its two gates */}
           <StageCard s={S("ingest")} sel={sel} setSel={setSel} />
