@@ -293,7 +293,7 @@ export default function Architecture() {
   const stage = STAGES.find(s => s.id === sel) ?? null;
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
+    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
       <section className="overflow-x-auto rounded-xl border border-gray-300 bg-white bg-[radial-gradient(circle,#e5e7eb_1px,transparent_1px)] [background-size:22px_22px] p-4 sm:p-8">
         <div className="mb-6 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500">
           <span><span className="mr-1 inline-block h-0 w-6 border-t-2 border-gray-400 align-middle" />every document</span>
@@ -302,7 +302,7 @@ export default function Architecture() {
           <span><span className="mr-1 rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] text-gray-700">stage</span>= the exact name its ledger rows carry</span>
         </div>
 
-        <div className="mx-auto min-w-[560px] max-w-2xl">
+        <div className="mx-auto min-w-[560px] max-w-5xl">
 
           {/* 1 · ingest + its two gates */}
           <StageCard s={S("ingest")} sel={sel} setSel={setSel} />

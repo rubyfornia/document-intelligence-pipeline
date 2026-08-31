@@ -3,7 +3,7 @@ import Link from "next/link";
 
 export default function Page() {
   return (
-    <main className="mx-auto max-w-6xl p-6 sm:p-8">
+    <main className="w-full p-6 sm:p-8">
       <header className="mb-6">
         <div className="flex items-center gap-4 text-sm">
           <Link href="/" className="text-brand-700 hover:underline">← Library</Link>
