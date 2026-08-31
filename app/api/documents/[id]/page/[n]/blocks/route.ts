@@ -1,7 +1,11 @@
 import { q } from "@/lib/db";
 export const dynamic = "force-dynamic";
+export const maxDuration = 30;
 
-// per-page text blocks with their provenance grade: measured (content stream) vs asserted (vision)
+// per-page text blocks with their provenance grade: measured (content stream) vs asserted (vision).
+// When a page has no measured blocks stored (vision replaced them), the text layer — if one exists —
+// is extracted live from the PDF and returned as measured reference lines, so the inspector can show
+// asserted geometry next to measured truth instead of pretending the assertion is precise.
 export async function GET(_: Request, { params }: { params: { id: string; n: string } }) {
   const n = parseInt(params.n, 10);
   if (!Number.isFinite(n)) return Response.json({ error: "bad page" }, { status: 400 });
@@ -10,5 +14,16 @@ export async function GET(_: Request, { params }: { params: { id: string; n: str
   const blocks = await q(
     `SELECT id, bbox, bbox_source, role, source FROM blocks WHERE document_id=$1 AND page_n=$2 ORDER BY order_index`,
     [params.id, n]);
-  return Response.json({ width: page.width, height: page.height, blocks });
+  let reference: { bbox: { x: number; y: number; w: number; h: number } }[] = [];
+  if (!blocks.some((b: any) => b.bbox_source === "measured")) {
+    try {
+      const [doc] = await q<{ pdf: Buffer }>(`SELECT pdf FROM documents WHERE id=$1`, [params.id]);
+      if (doc) {
+        const { openDoc, extractPage } = await import("@/lib/pdf");
+        const p = extractPage(openDoc(doc.pdf), n);
+        reference = p.lines.map(l => ({ bbox: l.bbox }));
+      }
+    } catch {} // no text layer, or unreadable — reference stays empty, honestly
+  }
+  return Response.json({ width: page.width, height: page.height, blocks, reference });
 }

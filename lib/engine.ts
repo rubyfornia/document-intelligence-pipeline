@@ -153,7 +153,7 @@ async function stTriage(run: Run) {
 }
 
 const visionSystem =
-  "You extract the structure of one document page from its image. Return every block of text in true reading order with its role, plus figures and tables with their regions. Bounding boxes are fractions of page width/height in [0,1] with origin top-left. For tables, set extraction_ok=false rather than inventing cells you cannot read. Report confidence honestly; note anything illegible.";
+  "You extract the structure of one document page from its image. Return every block of text in true reading order with its role, plus figures and tables with their regions. Bounding boxes are fractions of page width/height in [0,1] with origin top-left. x,y is the box's TOP-LEFT corner, never its center. The fractions cover the ENTIRE page image including its blank margins: (0,0) is the page's top-left corner and (1,1) its bottom-right, so a box around printed content normally starts inside the margins, not at 0. Make boxes tight to the visible content. For tables, set extraction_ok=false rather than inventing cells you cannot read. Report confidence honestly; note anything illegible.";
 
 async function stVision(run: Run) {
   if (run.cursor.queue == null) {

@@ -128,6 +128,12 @@ export default function DocView({ id, initialTab }: { id: string; initialTab?: s
             <div className="relative overflow-hidden rounded-xl border border-gray-300 bg-white">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={`/api/documents/${id}/page/${page}/image`} alt={`page ${page}`} className="block w-full" />
+              {showBlocks && pageBlocks?.reference?.map((l: any, i: number) => (
+                <div key={`ref${i}`}
+                  className="pointer-events-none absolute border border-emerald-500/60"
+                  style={blockStyle(l.bbox, pageBlocks.width, pageBlocks.height)}
+                  title="text line (measured — extracted on demand from the content stream)" />
+              ))}
               {showBlocks && pageBlocks?.blocks?.map((b: any) => (
                 <div key={b.id}
                   className={clsx("pointer-events-none absolute border",
@@ -207,22 +213,24 @@ export default function DocView({ id, initialTab }: { id: string; initialTab?: s
     </main>
   );
 }
+// clamp a fractional box to the page: asserted coordinates can overshoot the edge, and a box drawn
+// off-page reads as a rendering bug rather than what it is — an imprecise assertion
+function clampedPct(x: number, y: number, w: number, h: number) {
+  const cx = Math.min(Math.max(x, 0), 1), cy = Math.min(Math.max(y, 0), 1);
+  return {
+    left: `${cx * 100}%`,
+    top: `${cy * 100}%`,
+    width: `${Math.min(Math.max(w, 0), 1 - cx) * 100}%`,
+    height: `${Math.min(Math.max(h, 0), 1 - cy) * 100}%`,
+  } as React.CSSProperties;
+}
 function boxStyle(bbox: any) {
   // element bboxes are stored verbatim from vision: fractions of page size in [0,1], origin top-left
   // (blocks are converted to page points at ingest; elements are not)
-  return {
-    left: `${(bbox?.x ?? 0) * 100}%`,
-    top: `${(bbox?.y ?? 0) * 100}%`,
-    width: `${(bbox?.w ?? 0) * 100}%`,
-    height: `${(bbox?.h ?? 0) * 100}%`,
-  } as React.CSSProperties;
+  return clampedPct(bbox?.x ?? 0, bbox?.y ?? 0, bbox?.w ?? 0, bbox?.h ?? 0);
 }
 function blockStyle(bbox: any, w: number, h: number) {
   // block bboxes are in page points (deterministic from the content stream; vision converted at ingest)
-  return {
-    left: `${((bbox?.x ?? 0) / (w || 1)) * 100}%`,
-    top: `${((bbox?.y ?? 0) / (h || 1)) * 100}%`,
-    width: `${((bbox?.w ?? 0) / (w || 1)) * 100}%`,
-    height: `${((bbox?.h ?? 0) / (h || 1)) * 100}%`,
-  } as React.CSSProperties;
+  const W = w || 1, H = h || 1;
+  return clampedPct((bbox?.x ?? 0) / W, (bbox?.y ?? 0) / H, (bbox?.w ?? 0) / W, (bbox?.h ?? 0) / H);
 }
