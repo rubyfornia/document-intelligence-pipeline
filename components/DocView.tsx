@@ -14,7 +14,7 @@ export default function DocView({ id, initialTab }: { id: string; initialTab?: s
   const [page, setPage] = useState(1);
   const [sel, setSel] = useState<string | null>(null);
   const [showBlocks, setShowBlocks] = useState(false);
-  const [pageBlocks, setPageBlocks] = useState<{ width: number; height: number; blocks: any[] } | null>(null);
+  const [pageBlocks, setPageBlocks] = useState<{ width: number; height: number; blocks: any[]; reference?: any[] } | null>(null);
 
   useEffect(() => {
     if (!showBlocks) { setPageBlocks(null); return; }
