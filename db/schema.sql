@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS documents (
   abstract jsonb,
   status text NOT NULL DEFAULT 'queued',
   seed boolean NOT NULL DEFAULT false,
+  locked boolean NOT NULL DEFAULT false,  -- shipped demo corpus: protected from deletion
   error text,
   totals jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now()

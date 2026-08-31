@@ -22,6 +22,13 @@ export async function GET(_: Request, { params }: { params: { id: string; n: str
         const { openDoc, extractPage } = await import("@/lib/pdf");
         const p = extractPage(openDoc(doc.pdf), n);
         reference = p.lines.map(l => ({ bbox: l.bbox }));
+        // a scan has no text lines, but the scan image's extent IS measured from the content
+        // stream — show it as an anchor only when it is smaller than the page (a full-bleed
+        // raster's extent is just the page edge and anchors nothing)
+        if (!reference.length && p.width && p.height)
+          reference = p.imageBoxes
+            .filter(b => (b.w * b.h) / (p.width * p.height) < 0.95)
+            .map(bbox => ({ bbox }));
       }
     } catch {} // no text layer, or unreadable — reference stays empty, honestly
   }

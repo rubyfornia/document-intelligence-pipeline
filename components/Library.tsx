@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ClassStrip, StatusChip, money, secs } from "./ui";
 
-interface Doc { id: string; filename: string; title: any; status: string; seed: boolean; page_count: number; totals: any; classes: { n: number; class: string }[] }
+interface Doc { id: string; filename: string; title: any; status: string; seed: boolean; locked?: boolean; page_count: number; totals: any; classes: { n: number; class: string }[] }
 
 export default function Library() {
   const [docs, setDocs] = useState<Doc[]>([]);
@@ -64,6 +64,19 @@ export default function Library() {
                 <span>{d.totals?.cost_usd != null ? money(d.totals.cost_usd) : ""}</span>
                 <span>{d.totals?.duration_ms != null ? secs(d.totals.duration_ms) : ""}</span>
                 <StatusChip s={d.status} />
+                {!d.seed && !d.locked && (
+                  <button title="delete this upload (the shipped demo corpus is protected)"
+                    onClick={async e => {
+                      e.preventDefault(); e.stopPropagation();
+                      if (!window.confirm(`Delete "${d.title?.value ?? d.filename}"? This removes the document, its pages, chunks, and ledger.`)) return;
+                      const r = await fetch(`/api/documents/${d.id}`, { method: "DELETE" });
+                      if (!r.ok) setErr((await r.json()).error ?? "delete failed");
+                      refresh();
+                    }}
+                    className="rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-500 hover:border-rose-400 hover:text-rose-600">
+                    delete
+                  </button>
+                )}
               </div>
             </div>
             <div className="mt-3"><ClassStrip classes={d.classes} /></div>
