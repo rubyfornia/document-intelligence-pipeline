@@ -44,6 +44,9 @@ A 150-call vision budget caps any document; over it, deterministic extraction st
 remaining pages are marked `skipped_budget_exceeded`, and the document is `partial` with coverage
 shown — an explicit incomplete answer beats a silent one or an unbounded bill.
 
+The flow above is drawn live at **`/architecture`** — an interactive map where every node carries the
+exact `stage` name its ledger rows use, so the diagram and any document's ledger read into each other.
+
 ## Model & API choices
 
 Haiku 4.5 ($1/$5 per MTok) is capable enough for page extraction and 5× cheaper than the next tier;

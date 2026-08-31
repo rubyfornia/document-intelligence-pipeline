@@ -9,7 +9,10 @@ export default function Home() {
           <h1 className="text-2xl font-bold text-gray-900">Document Intelligence Pipeline</h1>
           <p className="mt-1 text-gray-600">PDF → structured representation, with the routing decisions on display.</p>
         </div>
-        <Link href="/relations" className="text-brand-700 hover:underline">Relationships →</Link>
+        <nav className="flex gap-4 text-sm sm:text-base">
+          <Link href="/architecture" className="text-brand-700 hover:underline">Architecture →</Link>
+          <Link href="/relations" className="text-brand-700 hover:underline">Relationships →</Link>
+        </nav>
       </header>
       <Library />
     </main>

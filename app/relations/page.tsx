@@ -13,7 +13,10 @@ export default function Relations() {
     <main className="mx-auto max-w-5xl p-6 sm:p-10">
       <header className="mb-6 flex items-center justify-between">
         <div>
-          <Link href="/" className="text-sm text-brand-700 hover:underline">← Library</Link>
+          <span className="flex gap-4 text-sm">
+            <Link href="/" className="text-brand-700 hover:underline">← Library</Link>
+            <Link href="/architecture" className="text-brand-700 hover:underline">Architecture →</Link>
+          </span>
           <h1 className="text-2xl font-bold text-gray-900">Cross-document relationships</h1>
           <p className="text-gray-600 text-sm">Chunk-level nearest neighbours over the embeddings the core pipeline already produced. Bands: near-duplicate ≥ 0.92 · related 0.75–0.92.</p>
         </div>

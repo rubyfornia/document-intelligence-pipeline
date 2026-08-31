@@ -6,10 +6,11 @@ import { ClassStrip, StatusChip, CLASS_LABELS, money, secs } from "./ui";
 
 const TABS = ["Overview", "Structure", "Representation", "Ledger"] as const;
 
-export default function DocView({ id }: { id: string }) {
+export default function DocView({ id, initialTab }: { id: string; initialTab?: string }) {
   const [data, setData] = useState<any>(null);
   const [ledger, setLedger] = useState<any[]>([]);
-  const [tab, setTab] = useState<(typeof TABS)[number]>("Overview");
+  const [tab, setTab] = useState<(typeof TABS)[number]>(
+    (TABS as readonly string[]).includes(initialTab ?? "") ? (initialTab as (typeof TABS)[number]) : "Overview");
   const [page, setPage] = useState(1);
   const [sel, setSel] = useState<string | null>(null);
 
