@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import clsx from "clsx";
 import { ClassStrip, StatusChip, CLASS_LABELS, money, secs } from "./ui";
@@ -45,9 +45,35 @@ export default function DocView({ id, initialTab }: { id: string; initialTab?: s
   const pageChunks = useMemo(() => (data?.chunks ?? []).filter((c: any) => page >= c.page_start && page <= c.page_end), [data, page]);
   const pageEls = useMemo(() => (data?.elements ?? []).filter((e: any) => e.page_n === page), [data, page]);
 
+  // the representation, line by line, so the Structure tab can scroll it to the current page
+  const jsonLines = useMemo(() => (data ? JSON.stringify(data, null, 2).split("\n") : []), [data]);
+  const lineIdxById = useMemo(() => {
+    const m: Record<string, number> = {};
+    jsonLines.forEach((l, i) => { const g = l.match(/"id": "((chk|sec|fig|tbl)_[a-f0-9]+)"/); if (g && !(g[1] in m)) m[g[1]] = i; });
+    return m;
+  }, [jsonLines]);
+  const jsonRef = useRef<HTMLDivElement>(null);
+  const [hlLine, setHlLine] = useState<number | null>(null);
+  useEffect(() => {
+    if (tab !== "Structure" || !data) return;
+    const target = pageChunks[0]?.id ?? pageEls[0]?.id;
+    const idx = target != null ? lineIdxById[target] : undefined;
+    if (idx == null) return;
+    const box = jsonRef.current;
+    const el = box?.querySelector(`[data-i="${idx}"]`) as HTMLElement | null;
+    if (box && el) {
+      // scroll only the panel, never the page
+      const top = el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - 8;
+      box.scrollTo({ top, behavior: "smooth" });
+      setHlLine(idx);
+      const t = setTimeout(() => setHlLine(null), 1600);
+      return () => clearTimeout(t);
+    }
+  }, [tab, page, data, pageChunks, pageEls, lineIdxById]);
+
   if (!d) return <div className="p-10 text-gray-500">Loading…</div>;
   return (
-    <main className="mx-auto max-w-6xl p-6 sm:p-8">
+    <main className="w-full p-6 sm:p-8">
       <header className="mb-6">
         <Link href="/" className="text-sm text-brand-700 hover:underline">← Library</Link>
         <div className="mt-1 flex items-center justify-between gap-4">
@@ -102,7 +128,7 @@ export default function DocView({ id, initialTab }: { id: string; initialTab?: s
       )}
 
       {tab === "Structure" && (
-        <div className="grid gap-6 lg:grid-cols-[240px_1fr_300px]">
+        <div className="grid gap-6 lg:grid-cols-[240px_1fr_300px] 2xl:grid-cols-[240px_minmax(0,5fr)_300px_minmax(0,4fr)]">
           <aside className="max-h-[70vh] overflow-auto rounded-xl border border-gray-200 bg-white p-3 text-sm">
             {(data.sections ?? []).map((s: any) => (
               <button key={s.id} onClick={() => setPage(s.page_start)}
@@ -170,6 +196,20 @@ export default function DocView({ id, initialTab }: { id: string; initialTab?: s
             ))}
             {!pageEls.length && !pageChunks.length && <div className="text-gray-400">Nothing extracted on this page.</div>}
           </aside>
+          <aside className="hidden 2xl:block">
+            <div className="mb-2 flex items-center justify-between text-xs text-gray-500">
+              <span>Representation — follows the page you are on</span>
+              <a className="text-brand-700 hover:underline" href={`/api/documents/${id}/export`} target="_blank">open raw ↗</a>
+            </div>
+            <div ref={jsonRef} className="max-h-[80vh] overflow-auto rounded-xl border border-gray-200 bg-gray-50 p-3 font-mono text-xs leading-relaxed">
+              {jsonLines.map((l, i) => (
+                <div key={i} data-i={i}
+                  className={clsx("whitespace-pre-wrap break-words", hlLine === i && "rounded bg-amber-200/60 transition-colors")}>
+                  {l || " "}
+                </div>
+              ))}
+            </div>
+          </aside>
         </div>
       )}
 
@@ -179,7 +219,7 @@ export default function DocView({ id, initialTab }: { id: string; initialTab?: s
             <div className="text-sm text-gray-600">This JSON is the deliverable a downstream system would be handed — <a className="text-brand-700 hover:underline" href={`/api/documents/${id}/export`} target="_blank">open raw ↗</a></div>
             <button className="rounded border px-2 py-1 text-sm" onClick={() => navigator.clipboard.writeText(JSON.stringify(data, null, 2))}>copy</button>
           </div>
-          <pre className="max-h-[70vh] overflow-auto rounded bg-gray-50 p-3 text-xs leading-relaxed">{JSON.stringify({ ...data, chunks: data.chunks?.slice(0, 40) }, null, 2)}</pre>
+          <pre className="max-h-[70vh] overflow-auto whitespace-pre-wrap break-words rounded bg-gray-50 p-3 text-xs leading-relaxed">{JSON.stringify({ ...data, chunks: data.chunks?.slice(0, 40) }, null, 2)}</pre>
         </section>
       )}
 
