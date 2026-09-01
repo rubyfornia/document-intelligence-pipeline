@@ -53,6 +53,8 @@ export default function Library() {
 
   return (
     <div className="space-y-6">
+      {/* sticky: the drop zone and the strip legend stay readable while the library scrolls */}
+      <div className="sticky top-0 z-20 -mx-2 space-y-2 bg-gray-50 px-2 pb-2 pt-2">
       <label
         onDragOver={e => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
@@ -69,6 +71,8 @@ export default function Library() {
         <div className="mt-1 text-sm text-gray-500">50 MB / 300 pages max. Corrupt or password-protected files are refused at the door, with the reason.</div>
       </label>
       {err && <div className="rounded-lg bg-rose-50 px-4 py-3 text-sm text-rose-800">{err}</div>}
+      <div className="text-xs text-gray-400">Strip legend: <span className="text-emerald-600">■ clean</span> · <span className="text-amber-600">■ complex</span> · <span className="text-rose-600">■ scanned</span> · <span className="text-purple-700">■ degraded</span> · <span className="text-sky-600">■ slide</span> · <span className="text-gray-400">■ blank</span></div>
+      </div>
       <div className="grid gap-4">
         {docs.map(d => (
           <Link key={d.id} href={`/doc/${d.id}`} className="block rounded-xl border border-gray-200 bg-white p-4 shadow-sm hover:shadow">
@@ -114,7 +118,6 @@ export default function Library() {
         ))}
         {!docs.length && <div className="text-gray-500">No documents yet.</div>}
       </div>
-      <div className="text-xs text-gray-400">Strip legend: <span className="text-emerald-600">■ clean</span> · <span className="text-amber-600">■ complex</span> · <span className="text-rose-600">■ scanned</span> · <span className="text-purple-700">■ degraded</span> · <span className="text-sky-600">■ slide</span> · <span className="text-gray-400">■ blank</span></div>
     </div>
   );
 }

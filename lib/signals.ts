@@ -47,7 +47,14 @@ export function computeSignals(p: PageExtract): Signals {
     const big = gaps[0];
     if (big && big.size > p.width * 0.22) {
       const left = big.at, right = xs.length - big.at;
-      if (left / xs.length > 0.25 && right / xs.length > 0.25) columns = 2;
+      if (left / xs.length > 0.25 && right / xs.length > 0.25) {
+        // a page-number rail (TOC, index, agenda) looks like a second column but carries almost
+        // no text: real columns share the characters, so the smaller side must hold ≥10% of them
+        const splitX = (xs[big.at - 1] + xs[big.at]) / 2;
+        let lc = 0, rc = 0;
+        for (const l of p.lines) (l.bbox.x < splitX ? (lc += l.text.length) : (rc += l.text.length));
+        if (Math.min(lc, rc) / Math.max(lc + rc, 1) >= 0.1) columns = 2;
+      }
     }
   }
 

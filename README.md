@@ -102,7 +102,10 @@ table is marked `table_extraction_failed` — an honest image beats a wrong grid
 budget blowout (`partial` + coverage); malformed model output (strict schemas → retry → escalate →
 honest failure); **provider content filtering** — verbatim OCR of book-like pages can trip a
 recitation guard; the pipeline retries once with document context, then keeps the page as image
-with a named `CONTENT_FILTER` warning. Boilerplate that carries value (a DOI in a running header)
+with a named `CONTENT_FILTER` warning. A page-number rail (a TOC or index) no longer reads as a
+second column — real columns share the characters — and a vision read that captures materially
+less text than the measured layer is discarded in favor of the deterministic blocks, with a named
+`VISION_UNDERREAD` warning: a misread is not an upgrade. Boilerplate that carries value (a DOI in a running header)
 is excluded from chunks but preserved and inspectable. **Provider rate limits** (a per-minute
 embedding quota once killed a run mid-pipeline) are weather, not defects: the run backs off across
 steps — the wait lives in the cursor, every wait is a ledger row, bounded at 8 attempts — and a run

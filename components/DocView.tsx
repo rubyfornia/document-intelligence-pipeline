@@ -40,6 +40,18 @@ export default function DocView({ id, initialTab }: { id: string; initialTab?: s
     fetch(`/api/documents/${id}/ledger`).then(r => r.json()).then(j => setLedger(j.events));
   }, [tab, id]);
 
+  // drive processing from here too — a run must not stall because the library screen was closed
+  const stepBusy = useRef(false);
+  useEffect(() => {
+    if (data?.document?.status !== "processing") return;
+    const t = setInterval(() => {
+      if (stepBusy.current) return;
+      stepBusy.current = true;
+      fetch(`/api/documents/${id}/step`, { method: "POST" }).catch(() => {}).finally(() => { stepBusy.current = false; });
+    }, 1500);
+    return () => clearInterval(t);
+  }, [id, data?.document?.status]);
+
   const d = data?.document;
   const pageRow = useMemo(() => data?.pages?.find((p: any) => p.n === page), [data, page]);
   const pageChunks = useMemo(() => (data?.chunks ?? []).filter((c: any) => page >= c.page_start && page <= c.page_end), [data, page]);
@@ -54,10 +66,14 @@ export default function DocView({ id, initialTab }: { id: string; initialTab?: s
   }, [jsonLines]);
   const jsonRef = useRef<HTMLDivElement>(null);
   const [hlLine, setHlLine] = useState<number | null>(null);
+  const lastScrolled = useRef<string | null>(null);
   useEffect(() => {
-    if (tab !== "Structure" || !data) return;
+    if (tab !== "Structure" || !data) { lastScrolled.current = null; return; }
     const target = pageChunks[0]?.id ?? pageEls[0]?.id;
-    const idx = target != null ? lineIdxById[target] : undefined;
+    // scroll only when the target itself changes — the processing re-fetch loop must not keep
+    // yanking the panel back while someone is reading it
+    if (target == null || lastScrolled.current === target) return;
+    const idx = lineIdxById[target];
     if (idx == null) return;
     const box = jsonRef.current;
     const el = box?.querySelector(`[data-i="${idx}"]`) as HTMLElement | null;
@@ -65,6 +81,7 @@ export default function DocView({ id, initialTab }: { id: string; initialTab?: s
       // scroll only the panel, never the page
       const top = el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - 8;
       box.scrollTo({ top, behavior: "smooth" });
+      lastScrolled.current = target;
       setHlLine(idx);
       const t = setTimeout(() => setHlLine(null), 1600);
       return () => clearTimeout(t);

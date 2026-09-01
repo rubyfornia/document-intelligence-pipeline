@@ -232,7 +232,8 @@ async function stVision(run: Run) {
   await Promise.all(batch.map(async n => {
     const t0 = Date.now();
     const png = rasterPage(doc, n);
-    const hint = (await pageLines(run.document_id, [n]))[0]?.lines.map(l => l.text).join("\n").slice(0, 2000) ?? "";
+    const detText = (await pageLines(run.document_id, [n]))[0]?.lines.map(l => l.text).join("\n") ?? "";
+    const hint = detText.slice(0, 2000);
     const r = await strictCall<any>({
       system: visionSystem,
       content: [
@@ -249,6 +250,16 @@ async function stVision(run: Run) {
       await warn(run.document_id, code, code === "CONTENT_FILTER"
         ? `page ${n}: provider content filter refused verbatim transcription; page kept as image only`
         : `page ${n}: model output failed validation after retry+escalation`, n);
+      return;
+    }
+    const detChars = detText.replace(/\s+/g, "").length;
+    const visChars = (r.data.blocks ?? []).map((b: any) => b.text ?? "").join("").replace(/\s+/g, "").length;
+    if (detChars >= 200 && visChars < detChars * 0.6) {
+      // The vision read captured materially less text than the measured layer — a misread, not an
+      // upgrade. Keep the deterministic blocks; surface the decision instead of shipping the loss.
+      await q(`UPDATE pages SET flags=array_append(flags,'vision_underread'), model=$3, ms=ms+$4, cost_usd=cost_usd+$5 WHERE document_id=$1 AND n=$2`,
+        [run.document_id, n, r.model, r.ms, r.costUsd]);
+      await warn(run.document_id, "VISION_UNDERREAD", `page ${n}: vision captured ${visChars} chars against ${detChars} in the text layer; deterministic text kept`, n);
       return;
     }
     const [{ width, height }] = await q(`SELECT width, height FROM pages WHERE document_id=$1 AND n=$2`, [run.document_id, n]);
