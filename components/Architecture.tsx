@@ -58,10 +58,12 @@ const STAGES: Stage[] = [
     one: "Free deterministic signals classify every page and dictate its route. This is the decision the whole design argues for.",
     what: [
       "Signals per page: character count, garbage ratio, image coverage, column clusters, font spread, orientation.",
+      "Column clusters carry a guard: a right-aligned page-number rail (a TOC, an index) is not a column — real columns share the characters, so the smaller side must hold ≥10% of them.",
       "Classes: A clean digital · B complex · C scanned · D degraded · slide · blank.",
     ],
     decisions: [
       "A, slide, blank, and figure-heavy or short B: deterministic extraction stands, no model is called.",
+      "Raster images on deterministic-routed pages become measured-grade figure elements at triage — free, no model call. Vector drawings remain the recorded gap.",
       "Multi-column B, C, and D: routed to the vision path (reading-order scramble is cheaper to prevent than repair).",
       "A page whose garbage ratio is high gets a distrust-text flag at triage time, independent of the sampler.",
       "Over 40% scanned/degraded → SCAN_HEAVY warning: structure fidelity is OCR-limited and the document says so.",
@@ -86,6 +88,7 @@ const STAGES: Stage[] = [
     ],
     fails: [
       "Malformed output → API-level validation failure → retry → escalate → VISION_FAILED warning; the page keeps its deterministic text. Honest degrade, not a crash.",
+      "A vision read that captures materially less text than the measured layer → discarded: VISION_UNDERREAD warning, the page keeps its deterministic text. A misread is not an upgrade.",
       "Verbatim OCR of book-like pages can trip the provider's recitation guard → retried once with document context, then kept as image with a named CONTENT_FILTER warning.",
       "A table the model cannot read honestly → extraction_ok=false: the crop is kept, the table is marked table_extraction_failed, no invented cells.",
     ],
@@ -117,6 +120,7 @@ const STAGES: Stage[] = [
     ],
     decisions: [
       "Section sources are recorded per row: outline, detected, vision, or fallback. Nothing pretends to a provenance it lacks.",
+      "Content on pages before the first section becomes a “Front matter” section (source: fallback) — a block no section claims would otherwise never reach a chunk.",
       "Suspicious adjacent headings → HEADING_SANITY warnings; outline/detection disagreement → OUTLINE_DISAGREES, surfaced, with the outline kept as prior.",
       "Nothing found at all → a single “Document” section, source: fallback.",
     ],
@@ -167,7 +171,8 @@ const STAGES: Stage[] = [
       "The cross-document relationships screen is built entirely on these vectors: near-duplicate ≥ 0.92, related 0.75–0.92, calibrated against planted ground truth.",
     ],
     fails: [
-      "An embedding failure fails the step visibly; nothing is written half-embedded.",
+      "A rate-limited batch backs off across steps — RATE_LIMITED ledger rows, bounded at 8 attempts — instead of striking out the run; the per-minute quota that once killed a run now costs a visible wait.",
+      "A real embedding failure fails the step visibly; nothing is written half-embedded.",
     ],
     measured: "NIST: 39 chunks embedded, 787ms, one batch.",
   },
@@ -181,6 +186,8 @@ const STAGES: Stage[] = [
     decisions: [
       "An explicit incomplete answer beats a silent one or an unbounded bill.",
       "Any step that throws three times → STEP ERROR rows on its own stage, and the document lands failed with the error stored. There is no separate error stage.",
+      "Rate limits and provider blips are not strikes: they back off across steps as RATE_LIMITED rows, bounded at 8 attempts, with the wait held in the cursor.",
+      "A failed document keeps a retry that resumes from the failed stage — the state was in Postgres all along, so a failure costs the failed step, not the document.",
     ],
     fails: [
       "failed is a first-class terminal state, never a silent hang: the run closes, the error is on the document.",
@@ -334,6 +341,7 @@ export default function Architecture() {
                 <div><ClassDot c="blank" /> blank → nothing to read, skipped</div>
                 <div><ClassDot c="B" /> B figure-heavy / short → deterministic text kept</div>
                 <div className="pt-1 text-gray-500">reading order not at risk → no vision spend</div>
+                <div className="text-gray-500">raster images → measured figure elements, still $0</div>
               </div>
             </div>
             <div className="rounded-xl border-2 border-dashed border-amber-400 bg-white p-3">
@@ -362,6 +370,7 @@ export default function Architecture() {
                     <MiniQ>schema invalid? → retry → escalate <span className="font-medium">Sonnet 5</span> → still failing? → VISION_FAILED warning, page keeps deterministic text</MiniQ>
                     <MiniQ>recitation guard trips? → retry once with document context → still blocked? → page kept as image + CONTENT_FILTER warning</MiniQ>
                     <MiniQ>table unreadable? → <span className="font-mono">extraction_ok=false</span> → crop kept, marked <span className="font-mono">table_extraction_failed</span></MiniQ>
+                    <MiniQ>read captured far less text than the measured layer? → VISION_UNDERREAD warning, page keeps deterministic text</MiniQ>
                     <MiniQ>self-reported confidence &lt; 0.5? → LOW_CONFIDENCE warning</MiniQ>
                     <Mini>success → page's lines replaced with vision reading order (asserted, points) · figure/table boxes stored verbatim [0,1] (dashed in the inspector)</Mini>
                   </div>
@@ -384,6 +393,7 @@ export default function Architecture() {
               <div className="mt-2 space-y-1">
                 <MiniQ>PDF outline present? → it is the prior (<span className="font-mono">source: outline</span>) · else font-statistics candidates (<span className="font-mono">detected</span> / <span className="font-mono">vision</span>)</MiniQ>
                 <MiniQ>normalization call fails? → ledger says “deterministic levels used”, pipeline continues</MiniQ>
+                <MiniQ>content before the first section? → “Front matter” section (<span className="font-mono">source: fallback</span>) — kept, never dropped</MiniQ>
                 <MiniQ>nothing found? → single “Document” section (<span className="font-mono">source: fallback</span>)</MiniQ>
                 <Mini>boilerplate (recurring headers/footers) excluded from chunks, preserved · HEADING_SANITY + OUTLINE_DISAGREES surfaced as warnings</Mini>
               </div>
@@ -416,7 +426,8 @@ export default function Architecture() {
             extra={
               <div className="mt-2 space-y-1.5">
                 <MiniQ>any page <span className="font-mono">skipped_budget_exceeded</span>? → <StatusChip s="partial" /> with coverage shown · else <StatusChip s="complete" /></MiniQ>
-                <MiniQ>any step threw 3×? → STEP ERROR rows on its own stage → <StatusChip s="failed" /> with the error stored</MiniQ>
+                <MiniQ>rate limit / provider blip? → RATE_LIMITED rows, backing off across steps (bounded at 8) — never a strike</MiniQ>
+                <MiniQ>any step threw 3×? → STEP ERROR rows on its own stage → <StatusChip s="failed" /> with the error stored — <span className="font-medium">retry</span> resumes from the failed stage</MiniQ>
               </div>
             } />
         </div>
@@ -431,7 +442,8 @@ export default function Architecture() {
             <p className="mt-3">Two honest edges of that rule:</p>
             <ul className="mt-1 list-disc space-y-1 pl-5">
               <li><span className="font-medium">Ingest refusals never reach a ledger</span>, because a refused file never becomes a document. The refusal and its reason surface in the upload UI instead.</li>
-              <li><span className="font-medium">There is no separate error stage.</span> A step that fails writes a STEP ERROR note on the stage it failed in; three strikes and the document lands failed. Errors live where they happened.</li>
+              <li><span className="font-medium">There is no separate error stage.</span> A step that fails writes a STEP ERROR note on the stage it failed in; three strikes and the document lands failed — and a retry resumes it from that stage, because the state was in Postgres all along. Rate limits are not strikes: they back off across steps as RATE_LIMITED rows, bounded at 8.</li>
+              <li><span className="font-medium">One driver at a time.</span> Every open screen posts <span className="font-mono text-xs">/step</span> for a processing document; a lease on the run row arbitrates them, so stages cannot double-run or double-write the ledger.</li>
             </ul>
             <p className="mt-3 text-gray-500">Click any stage for what runs, the decisions it takes, what can go wrong, and its measured numbers from the real 48-page NIST holdout. Diamonds are the actual branch points in the code.</p>
           </div>

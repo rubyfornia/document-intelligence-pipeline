@@ -6,6 +6,9 @@ import { ClassStrip, StatusChip, CLASS_LABELS, money, secs } from "./ui";
 
 const TABS = ["Overview", "Structure", "Representation", "Ledger"] as const;
 
+// step numbers matching the architecture board (1 = Ingest, which never reaches a ledger)
+const STAGE_N: Record<string, number> = { extract: 2, triage: 3, vision: 4, sampler: 5, structure: 6, chunk: 7, summarize: 8, embed: 9, finalize: 10 };
+
 export default function DocView({ id, initialTab }: { id: string; initialTab?: string }) {
   const [data, setData] = useState<any>(null);
   const [ledger, setLedger] = useState<any[]>([]);
@@ -252,7 +255,15 @@ export default function DocView({ id, initialTab }: { id: string; initialTab?: s
                 {ledger.map((e: any) => (
                   <tr key={e.id} className="border-t border-gray-100">
                     <td className="px-2 py-1 text-gray-400">{new Date(e.ts).toLocaleTimeString()}</td>
-                    <td className="px-2 py-1 font-medium">{e.stage}</td>
+                    <td className="px-2 py-1 font-medium">
+                      <span className="inline-flex items-center gap-1.5">
+                        {STAGE_N[e.stage] != null && (
+                          <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-900 text-[10px] font-bold text-white"
+                                title={`step ${STAGE_N[e.stage]} on the architecture board`}>{STAGE_N[e.stage]}</span>
+                        )}
+                        {e.stage}
+                      </span>
+                    </td>
                     <td className="px-2 py-1">{e.page_n ?? ""}</td>
                     <td className="px-2 py-1">{e.model ?? ""}</td>
                     <td className="px-2 py-1">{e.input_tokens ?? ""}</td>
