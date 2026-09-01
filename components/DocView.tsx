@@ -70,8 +70,30 @@ export default function DocView({ id, initialTab }: { id: string; initialTab?: s
   const jsonRef = useRef<HTMLDivElement>(null);
   const [hlLine, setHlLine] = useState<number | null>(null);
   const lastScrolled = useRef<string | null>(null);
+
+  // find-in-JSON: type text seen on the page to confirm it made it into the representation.
+  // Zero matches on visible slide text is a capture gap, surfaced in one keystroke.
+  const [jsonQuery, setJsonQuery] = useState("");
+  const [matchIdx, setMatchIdx] = useState(0);
+  const matchLines = useMemo(() => {
+    const q = jsonQuery.trim().toLowerCase();
+    if (!q) return [] as number[];
+    const out: number[] = [];
+    jsonLines.forEach((l, i) => { if (l.toLowerCase().includes(q)) out.push(i); });
+    return out;
+  }, [jsonQuery, jsonLines]);
+  const matchSet = useMemo(() => new Set(matchLines), [matchLines]);
+  const currentMatch = matchLines.length ? matchLines[Math.min(matchIdx, matchLines.length - 1)] : null;
+  useEffect(() => {
+    if (currentMatch == null) return;
+    const box = jsonRef.current;
+    const el = box?.querySelector(`[data-i="${currentMatch}"]`) as HTMLElement | null;
+    if (box && el) box.scrollTo({ top: el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - 60, behavior: "auto" });
+  }, [currentMatch]);
+
   useEffect(() => {
     if (tab !== "Structure" || !data) { lastScrolled.current = null; return; }
+    if (jsonQuery.trim()) return; // a live search owns the panel; page-sync stays out of the way
     const target = pageChunks[0]?.id ?? pageEls[0]?.id;
     // scroll only when the target itself changes — the processing re-fetch loop must not keep
     // yanking the panel back while someone is reading it
@@ -89,7 +111,7 @@ export default function DocView({ id, initialTab }: { id: string; initialTab?: s
       const t = setTimeout(() => setHlLine(null), 1600);
       return () => clearTimeout(t);
     }
-  }, [tab, page, data, pageChunks, pageEls, lineIdxById]);
+  }, [tab, page, data, pageChunks, pageEls, lineIdxById, jsonQuery]);
 
   if (!d) return <div className="p-10 text-gray-500">Loading…</div>;
   return (
@@ -217,15 +239,30 @@ export default function DocView({ id, initialTab }: { id: string; initialTab?: s
             {!pageEls.length && !pageChunks.length && <div className="text-gray-400">Nothing extracted on this page.</div>}
           </aside>
           <aside className="hidden 2xl:block">
-            <div className="mb-2 flex items-center justify-between text-xs text-gray-500">
-              <span>Representation — follows the page you are on</span>
+            <div className="mb-2 flex items-center gap-2 text-xs text-gray-500">
+              <span className="min-w-0 flex-1 truncate">Representation — follows the page you are on</span>
+              <input
+                value={jsonQuery}
+                onChange={e => { setJsonQuery(e.target.value); setMatchIdx(0); }}
+                onKeyDown={e => { if (e.key === "Enter" && matchLines.length) setMatchIdx(i => (i + 1) % matchLines.length); }}
+                placeholder="find text in the JSON…"
+                title="type text you can see on the page to confirm it reached the representation · Enter cycles matches"
+                className="w-44 rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 focus:border-brand-400 focus:outline-none"
+              />
+              {jsonQuery.trim() !== "" && (
+                <span className={clsx("tabular-nums", matchLines.length ? "text-gray-600" : "font-medium text-rose-600")}>
+                  {matchLines.length ? `${Math.min(matchIdx, matchLines.length - 1) + 1}/${matchLines.length}` : "0 found"}
+                </span>
+              )}
               <a className="text-brand-700 hover:underline" href={`/api/documents/${id}/export`} target="_blank">open raw ↗</a>
             </div>
             <div ref={jsonRef} className="max-h-[80vh] overflow-auto rounded-xl border border-gray-200 bg-gray-50 p-3 font-mono text-xs leading-relaxed">
               {jsonLines.map((l, i) => (
                 <div key={i} data-i={i}
-                  className={clsx("whitespace-pre-wrap break-words", hlLine === i && "rounded bg-amber-200/60 transition-colors")}>
-                  {l || " "}
+                  className={clsx("whitespace-pre-wrap break-words",
+                    hlLine === i && "rounded bg-amber-200/60 transition-colors",
+                    matchSet.has(i) && (i === currentMatch ? "rounded bg-amber-300/70" : "rounded bg-yellow-100"))}>
+                  {matchSet.has(i) ? markMatches(l, jsonQuery.trim()) : (l || " ")}
                 </div>
               ))}
             </div>
@@ -281,6 +318,22 @@ export default function DocView({ id, initialTab }: { id: string; initialTab?: s
     </main>
   );
 }
+// wrap every occurrence of the query inside a line with <mark>, case-insensitively
+function markMatches(line: string, q: string): React.ReactNode {
+  if (!q) return line || " ";
+  const lower = line.toLowerCase(), ql = q.toLowerCase();
+  const out: React.ReactNode[] = [];
+  let i = 0, k = 0;
+  while (true) {
+    const j = lower.indexOf(ql, i);
+    if (j < 0) { out.push(line.slice(i)); break; }
+    if (j > i) out.push(line.slice(i, j));
+    out.push(<mark key={k++} className="bg-amber-300">{line.slice(j, j + q.length)}</mark>);
+    i = j + q.length;
+  }
+  return out;
+}
+
 // clamp a fractional box to the page: asserted coordinates can overshoot the edge, and a box drawn
 // off-page reads as a rendering bug rather than what it is — an imprecise assertion
 function clampedPct(x: number, y: number, w: number, h: number) {
