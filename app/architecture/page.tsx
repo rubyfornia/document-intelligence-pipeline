@@ -11,7 +11,7 @@ export default function Page() {
         </div>
         <h1 className="mt-2 text-2xl font-bold text-gray-900">Architecture</h1>
         <p className="mt-1 text-gray-600">
-          The ten-step pipeline, drawn. Every node carries the exact stage name its ledger rows use, so this
+          The ten-step pipeline, drawn. Every node carries the exact stage name its ledger rows use and the file:line ranges that implement it, so this
           board and any document's ledger read into each other. Hover for the gist; click to pin the details.
         </p>
       </header>

@@ -11,6 +11,8 @@ type Stage = {
   ledger: string | null; // exact `stage` string its ledger rows carry; null = runs before a document exists
   model: string | null;
   modelTone: string;
+  engine?: string;   // the runtime the stage leans on (mupdf compiled to WebAssembly)
+  code?: string[];   // "file:lines — what lives there" · verified against the delivered tree; re-verify after any lib edit
   one: string; // hover popover line
   what: string[];
   decisions: string[];
@@ -20,7 +22,7 @@ type Stage = {
 
 const STAGES: Stage[] = [
   {
-    id: "ingest", n: 1, name: "Ingest", ledger: null, model: null, modelTone: "bg-gray-100 text-gray-600",
+    id: "ingest", n: 1, name: "Ingest", ledger: null, model: null, modelTone: "bg-gray-100 text-gray-600", engine: "mupdf · WASM",
     one: "Accept or refuse at the door. A refused file never becomes a document, so nothing to ledger.",
     what: [
       "SHA-256 the bytes; an already-seen document short-circuits to its existing result (cached).",
@@ -35,26 +37,35 @@ const STAGES: Stage[] = [
       "Password-protected → refused 422 as its own case, distinguished from generic parse failure.",
       "Over caps → refused 413 (size or page count named).",
     ],
+    code: [
+      "app/api/upload/route.ts:9-37 — caps, SHA-256 dedupe, fast-fail gates",
+      "lib/pdf.ts:22-24 — openDoc (mupdf)",
+    ],
     measured: "NIST: 48 pages accepted. The corpus's corrupt and password seeds are refused at this door, on purpose.",
   },
   {
-    id: "extract", n: 2, name: "Extract", ledger: "extract", model: null, modelTone: "bg-gray-100 text-gray-600",
+    id: "extract", n: 2, name: "Extract", ledger: "extract", model: null, modelTone: "bg-gray-100 text-gray-600", engine: "mupdf · WASM",
     one: "Structured text with fonts and boxes, per page, in 6-page batches. Deterministic and free.",
     what: [
       "mupdf structured text: every line with its font, size, boldness, and a measured bounding box in page points.",
       "Runs in batches of 6 pages per step call; each batch is one ledger row.",
     ],
     decisions: [
+      "The engine is MuPDF compiled to WebAssembly: it ships as one npm dependency and runs inside the JS runtime, so there are no native binaries for a serverless deploy to break — the most common way PDF pipelines die on serverless is deleted as a failure class.",
       "Coordinates from the content stream are stored as measured-grade provenance (solid style in the inspector).",
       "Batched, idempotent writes: per-row inserts that were invisible locally were 60s-timeout fatal at cloud latency.",
     ],
     fails: [
       "A plausible-garbage text layer sails through here looking fine → that is exactly what the cross-check sampler exists to catch downstream.",
     ],
+    code: [
+      "lib/pdf.ts:50-82 — extractPage: structured text with measured boxes",
+      "lib/engine.ts:141-178 — stExtract: 6-page batches, idempotent writes",
+    ],
     measured: "NIST: 8 batches, 48 pages, about 1.1s of wall clock, $0.",
   },
   {
-    id: "triage", n: 3, name: "Triage — the switch", ledger: "triage", model: null, modelTone: "bg-gray-100 text-gray-600",
+    id: "triage", n: 3, name: "Triage — the switch", ledger: "triage", model: null, modelTone: "bg-gray-100 text-gray-600", engine: "mupdf · WASM",
     one: "Free deterministic signals classify every page and dictate its route. This is the decision the whole design argues for.",
     what: [
       "Signals per page: character count, garbage ratio, image coverage, column clusters, font spread, orientation.",
@@ -71,10 +82,15 @@ const STAGES: Stage[] = [
     fails: [
       "Misclassification costs money, not correctness: a clean page sent to vision wastes cents; a garbage page kept deterministic is caught by the sampler.",
     ],
+    code: [
+      "lib/signals.ts:20-77 — computeSignals (the column guard lives here)",
+      "lib/signals.ts:78-107 — triagePage: class + route verdicts",
+      "lib/engine.ts:179-210 — stTriage: routes applied, measured raster figures",
+    ],
     measured: "NIST: 490ms, classes {A:41, B:7}, $0. Of the 7 complex pages, only one (the multi-column TOC) routed to vision.",
   },
   {
-    id: "vision", n: 4, name: "Vision path", ledger: "vision", model: "Haiku 4.5 → Sonnet 5 on evidence", modelTone: "bg-amber-100 text-amber-800",
+    id: "vision", n: 4, name: "Vision path", ledger: "vision", model: "Haiku 4.5 → Sonnet 5 on evidence", modelTone: "bg-amber-100 text-amber-800", engine: "mupdf · WASM",
     one: "Only the pages that earned it. Strict-schema page reading from the on-demand rendered image.",
     what: [
       "Page rendered on demand, read under a strict tool schema: blocks in true reading order, plus figures and tables with regions.",
@@ -92,10 +108,15 @@ const STAGES: Stage[] = [
       "Verbatim OCR of book-like pages can trip the provider's recitation guard → retried once with document context, then kept as image with a named CONTENT_FILTER warning.",
       "A table the model cannot read honestly → extraction_ok=false: the crop is kept, the table is marked table_extraction_failed, no invented cells.",
     ],
+    code: [
+      "lib/engine.ts:211-291 — visionSystem + stVision: replace, under-read guard, budget",
+      "lib/models.ts:35-83 — strictCall: strict tools, retry, Sonnet escalation",
+      "lib/pdf.ts:85-93 — rasterPage: on-demand render, no image store",
+    ],
     measured: "NIST: 1 call (page 4, the multi-column TOC), 17.9s, $0.0257. Escalation never fired.",
   },
   {
-    id: "sampler", n: 5, name: "Cross-check sampler", ledger: "sampler", model: "Haiku 4.5, cheap reads", modelTone: "bg-amber-100 text-amber-800",
+    id: "sampler", n: 5, name: "Cross-check sampler", ledger: "sampler", model: "Haiku 4.5, cheap reads", modelTone: "bg-amber-100 text-amber-800", engine: "mupdf · WASM",
     one: "Up to five clean-looking pages get a vision read anyway. The one failure no cheap signal can see is a text layer of plausible garbage.",
     what: [
       "Sample up to 5 pages the triage trusted; compare each cheap vision read against the extracted text by word overlap (Jaccard).",
@@ -108,10 +129,13 @@ const STAGES: Stage[] = [
     fails: [
       "A sampler call that fails is logged as its own row → the sample is smaller, never silently padded.",
     ],
+    code: [
+      "lib/engine.ts:292-326 — stSampler: Jaccard overlap, majority flip",
+    ],
     measured: "NIST: 5 pages, overlaps 0.53–0.97, 1 mismatch (the sparse cover). Majority rule: no flip, and that is correct.",
   },
   {
-    id: "structure", n: 6, name: "Structure", ledger: "structure", model: "one normalization call", modelTone: "bg-amber-100 text-amber-800",
+    id: "structure", n: 6, name: "Structure", ledger: "structure", model: "one normalization call", modelTone: "bg-amber-100 text-amber-800", engine: "mupdf · WASM",
     one: "Heading candidates reconciled against the PDF outline where one exists. Boilerplate preserved, never destroyed.",
     what: [
       "If the PDF carries an outline, it is the prior (source: outline). Otherwise font-statistics candidates (source: detected), or vision headings on vision pages (source: vision).",
@@ -126,6 +150,10 @@ const STAGES: Stage[] = [
     ],
     fails: [
       "Normalization call fails → the ledger row says “deterministic levels used”. The pipeline does not stop.",
+    ],
+    code: [
+      "lib/structure.ts:14-88 — boilerplate, heading candidates, tree sanity",
+      "lib/engine.ts:327-427 — stStructure: outline prior, front matter, sections",
     ],
     measured: "NIST: 30 sections from the outline prior; 10 HEADING_SANITY warnings and one OUTLINE_DISAGREES surfaced, not hidden. Boilerplate caught “NIST AI 100-1” on 45 of 48 pages.",
   },
@@ -143,6 +171,11 @@ const STAGES: Stage[] = [
     fails: [
       "An oversized section hits the 1,200-token ceiling and splits at the nearest paragraph, never mid-table.",
     ],
+    code: [
+      "lib/chunker.ts:11-29 — buildChunks: leaf-scoped greedy packing",
+      "lib/chunker.ts:31-32 — the embedding-text template",
+      "lib/engine.ts:428-478 — stChunk: atomic figure/table chunks",
+    ],
     measured: "NIST: 39 chunks, 384ms, $0.",
   },
   {
@@ -157,6 +190,9 @@ const STAGES: Stage[] = [
     ],
     fails: [
       "A failed call is a ledger row with the error in its note; the section keeps no summary rather than a fabricated one.",
+    ],
+    code: [
+      "lib/engine.ts:479-510 — stSummarize: sections, then the evidence-named abstract",
     ],
     measured: "NIST: 20 calls (19 sections + the abstract), $0.046.",
   },
@@ -173,6 +209,10 @@ const STAGES: Stage[] = [
     fails: [
       "A rate-limited batch backs off across steps — RATE_LIMITED ledger rows, bounded at 8 attempts — instead of striking out the run; the per-minute quota that once killed a run now costs a visible wait.",
       "A real embedding failure fails the step visibly; nothing is written half-embedded.",
+    ],
+    code: [
+      "lib/models.ts:85-108 — embedBatch + normalize (truncated dims, cosine works)",
+      "lib/engine.ts:511-521 — stEmbed",
     ],
     measured: "NIST: 39 chunks embedded, 787ms, one batch.",
   },
@@ -191,6 +231,11 @@ const STAGES: Stage[] = [
     ],
     fails: [
       "failed is a first-class terminal state, never a silent hang: the run closes, the error is on the document.",
+    ],
+    code: [
+      "lib/engine.ts:522-538 — stFinalize: totals written from the ledger",
+      "lib/engine.ts:58-140 — step: the run-row lease, backoff, three strikes",
+      "app/api/documents/[id]/retry/route.ts — resume from the failed stage",
     ],
     measured: "NIST: complete · 27 model calls · $0.1177 · 181.8s.",
   },
@@ -260,11 +305,23 @@ function StageCard({ s, sel, setSel, extra }: { s: Stage; sel: string | null; se
         {s.ledger
           ? <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] text-gray-700" title="ledger rows for this stage carry exactly this name">{s.ledger}</span>
           : <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-800" title="a refused file never becomes a document, so there is no ledger to write to">before the ledger</span>}
+        {s.engine && (
+          <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[11px] font-medium text-violet-800"
+                title="MuPDF compiled to WebAssembly — runs inside the JS runtime like any module: one npm dependency, zero native binaries, nothing for a serverless deploy to break">
+            {s.engine}
+          </span>
+        )}
         {s.model
           ? <span className={clsx("ml-auto rounded-full px-2 py-0.5 text-[11px] font-medium", s.modelTone)}>{s.model}</span>
           : <span className="ml-auto rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-500">no model · $0</span>}
       </div>
       {extra}
+      {s.code?.length ? (
+        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[10px] text-gray-500"
+             title="the files and line ranges that implement this stage — click the card for what lives in each">
+          {s.code.map((c, i) => <span key={i}>{c.split(" — ")[0]}</span>)}
+        </div>
+      ) : null}
       <div className="pointer-events-none invisible absolute left-1/2 top-full z-20 mt-1 w-72 -translate-x-1/2 rounded-lg border border-gray-200 bg-gray-900 p-2.5 text-xs leading-relaxed text-gray-100 opacity-0 shadow-lg transition group-hover:visible group-hover:opacity-100">
         {s.one}<span className="mt-1 block text-gray-400">click to pin details</span>
       </div>
@@ -307,6 +364,8 @@ export default function Architecture() {
           <span><span className="mr-1 inline-block h-0 w-6 border-t-2 border-dashed border-amber-500 align-middle" />conditional / exit</span>
           <span><span className="mr-1 inline-block h-2.5 w-2.5 rotate-45 border-2 border-gray-500 bg-white align-middle" /> decision</span>
           <span><span className="mr-1 rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] text-gray-700">stage</span>= the exact name its ledger rows carry</span>
+          <span><span className="mr-1 rounded bg-violet-100 px-1.5 py-0.5 text-[11px] font-medium text-violet-800">mupdf · WASM</span>= the PDF engine, compiled to WebAssembly — inside the JS runtime, zero native binaries</span>
+          <span><span className="mr-1 rounded bg-gray-100 px-1 py-0.5 font-mono text-[10px] text-gray-500">file:lines</span>= where the stage lives in the code, verified against the delivered tree</span>
         </div>
 
         <div className="min-w-[560px]">
@@ -438,7 +497,7 @@ export default function Architecture() {
         {!stage ? (
           <div className="rounded-xl border border-gray-200 bg-white p-5 text-sm leading-relaxed text-gray-700">
             <div className="mb-2 text-base font-semibold text-gray-900">The board and the ledger agree, by construction</div>
-            <p>Every stage on this board writes its ledger rows under the <span className="font-mono text-xs">stage</span> name printed on the node, and every stage name a ledger can contain is a node on this board. Read a row, find its box; click a box, see its rows.</p>
+            <p>Every stage on this board writes its ledger rows under the <span className="font-mono text-xs">stage</span> name printed on the node, and every stage name a ledger can contain is a node on this board. Read a row, find its box; click a box, see its rows. Every stage also names the files and line ranges that implement it — the board, the ledger, and the code are one artifact.</p>
             <p className="mt-3">Two honest edges of that rule:</p>
             <ul className="mt-1 list-disc space-y-1 pl-5">
               <li><span className="font-medium">Ingest refusals never reach a ledger</span>, because a refused file never becomes a document. The refusal and its reason surface in the upload UI instead.</li>
@@ -460,6 +519,17 @@ export default function Architecture() {
             <ul className="mt-1 list-disc space-y-1 pl-5 text-gray-700">{stage.decisions.map((t, i) => <li key={i}>{t}</li>)}</ul>
             <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-gray-400">What can go wrong → how it surfaces</div>
             <ul className="mt-1 list-disc space-y-1 pl-5 text-gray-700">{stage.fails.map((t, i) => <li key={i}>{t}</li>)}</ul>
+            {!!stage.code?.length && (
+              <>
+                <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-gray-400">Where it lives in the code</div>
+                <ul className="mt-1 space-y-1 text-gray-700">
+                  {stage.code.map((c, i) => {
+                    const [ref, what] = c.split(" — ");
+                    return <li key={i}><span className="rounded bg-gray-100 px-1 py-0.5 font-mono text-xs">{ref}</span>{what ? <span className="text-gray-600"> — {what}</span> : null}</li>;
+                  })}
+                </ul>
+              </>
+            )}
             <div className="mt-3 rounded-lg bg-gray-50 p-3 text-gray-700">
               <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">Measured, not estimated</div>
               <div className="mt-1">{stage.measured}</div>
