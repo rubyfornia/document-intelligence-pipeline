@@ -120,9 +120,11 @@ CREATE TABLE IF NOT EXISTS runs (
   status text NOT NULL DEFAULT 'processing',  -- processing | complete | partial | failed
   stage text NOT NULL DEFAULT 'extract',
   cursor jsonb NOT NULL DEFAULT '{}'::jsonb,
+  claimed_until timestamptz,                  -- step lease: one driver at a time, pooler-safe
   started_at timestamptz NOT NULL DEFAULT now(),
   finished_at timestamptz
 );
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS claimed_until timestamptz;
 
 -- THE LEDGER: what actually ran — written from the execution path itself.
 CREATE TABLE IF NOT EXISTS run_events (

@@ -1,7 +1,7 @@
 // The step engine. POST /api/documents/:id/step advances exactly one bounded unit of work.
 // State lives in Postgres; every model call becomes a run_events row — the ledger records
 // what ran, not what was intended.
-import { q, db } from "./db";
+import { q } from "./db";
 import { id } from "./ids";
 import { openDoc, extractPage, rasterPage, docMeta, docOutline } from "./pdf";
 import { triagePage } from "./signals";
@@ -58,23 +58,30 @@ const pageLines = async (docId: string, ns: number[]): Promise<PageLines[]> => {
 export async function step(docId: string) {
   // One driver at a time. Every open library tab posts /step for a processing document — the
   // author's tab plus an evaluator's is enough to double-run stages and double-write the ledger.
-  // The advisory lock rides its own connection; it releases in finally, or with the session.
-  const client = await db().connect();
-  let locked = false;
+  // A session advisory lock cannot do this job here: the pooled Postgres endpoint runs
+  // transaction-mode pooling, where session locks don't follow the logical connection. So the
+  // claim is a LEASE on the run row itself — one atomic UPDATE wins, everyone else sees
+  // `contended`, and the lease outlives any serverless timeout then expires on its own, so a
+  // crashed step can never wedge the document.
+  const [run] = await q<Run>(
+    `UPDATE runs r SET claimed_until = now() + interval '120 seconds'
+     FROM (SELECT id FROM runs WHERE document_id=$1 ORDER BY started_at DESC LIMIT 1) last
+     WHERE r.id = last.id AND (r.claimed_until IS NULL OR r.claimed_until < now())
+     RETURNING r.*`, [docId]);
+  if (!run) {
+    const [exists] = await q(`SELECT id FROM runs WHERE document_id=$1 LIMIT 1`, [docId]);
+    if (!exists) throw new Error("no run");
+    return { done: false, status: "processing", contended: true };
+  }
   try {
-    const r = await client.query(`SELECT pg_try_advisory_lock(hashtext($1)::bigint) AS locked`, [docId]);
-    locked = r.rows[0].locked;
-    if (!locked) return { done: false, status: "processing", contended: true };
-    return await stepLocked(docId);
+    return await stepClaimed(run);
   } finally {
-    if (locked) await client.query(`SELECT pg_advisory_unlock(hashtext($1)::bigint)`, [docId]);
-    client.release();
+    await q(`UPDATE runs SET claimed_until = NULL WHERE id=$1`, [run.id]);
   }
 }
 
-async function stepLocked(docId: string) {
-  const [run] = await q<Run>(`SELECT * FROM runs WHERE document_id=$1 ORDER BY started_at DESC LIMIT 1`, [docId]);
-  if (!run) throw new Error("no run");
+async function stepClaimed(run: Run) {
+  const docId = run.document_id;
   if (run.status !== "processing") return { stage: run.stage, done: true, status: run.status };
   // a transient-error backoff may be in force — wait it out; polling a waiting run costs nothing
   if (run.cursor.retry_at && Date.now() < run.cursor.retry_at)
@@ -245,8 +252,10 @@ async function stVision(run: Run) {
       return;
     }
     const [{ width, height }] = await q(`SELECT width, height FROM pages WHERE document_id=$1 AND n=$2`, [run.document_id, n]);
-    // replace any deterministic lines for this page with vision reading order
+    // replace any deterministic lines for this page with vision reading order; a re-run of the
+    // same page (mid-batch retry) also replaces its own earlier vision output rather than doubling
     await q(`DELETE FROM blocks WHERE document_id=$1 AND page_n=$2`, [run.document_id, n]);
+    await q(`DELETE FROM elements WHERE document_id=$1 AND page_n=$2 AND source='vision'`, [run.document_id, n]);
     let i = 0;
     for (const b of r.data.blocks ?? []) {
       const bbox = { x: b.bbox.x * (width || 1), y: b.bbox.y * (height || 1), w: b.bbox.w * (width || 1), h: b.bbox.h * (height || 1) };
@@ -307,6 +316,11 @@ const jaccard = (a: Set<string>, b: Set<string>) => { if (!a.size && !b.size) re
 async function stStructure(run: Run) {
   const t0 = Date.now();
   const docId = run.document_id;
+  // idempotent re-entry: a structure step that failed partway runs again from a clean slate
+  await q(`DELETE FROM sections WHERE document_id=$1`, [docId]);
+  await q(`DELETE FROM boilerplate WHERE document_id=$1`, [docId]);
+  await q(`DELETE FROM warnings WHERE document_id=$1 AND code IN ('HEADING_SANITY','OUTLINE_DISAGREES')`, [docId]);
+  await q(`UPDATE blocks SET section_id=NULL, boilerplate=false WHERE document_id=$1`, [docId]);
   const all = await q(`SELECT n FROM pages WHERE document_id=$1 ORDER BY n`, [docId]);
   const pls = await pageLines(docId, all.map(r => r.n));
   const bp = detectBoilerplate(pls);
@@ -356,6 +370,7 @@ async function stStructure(run: Run) {
   } else sections = [];
   if (!sections.length) sections = [{ title: "Document", level: 1, page: 1, source: "fallback", confidence: 0.3 }];
 
+  const primarySource = sections[0]?.source ?? "fallback";
   // content on pages before the first section — a cover blurb, an intro passage — is front
   // matter: a block no section claims never reaches a chunk, and dropped text is a coverage
   // hole downstream can't see. Synthesized only when real (non-boilerplate) blocks exist there.
@@ -395,13 +410,14 @@ async function stStructure(run: Run) {
   for (const s of secRows)
     await q(`UPDATE blocks SET section_id=$2 WHERE document_id=$1 AND page_n BETWEEN $3 AND $4 AND section_id IS NULL AND NOT boilerplate`,
       [docId, s.id, s.page_start, s.page_end]);
-  await ev(run, "structure", { note: `${secRows.length} sections (${sections[0]?.source})`, ms: Date.now() - t0 });
+  await ev(run, "structure", { note: `${secRows.length} sections (${primarySource})`, ms: Date.now() - t0 });
   await setCursor(run, "chunk", {});
 }
 
 async function stChunk(run: Run) {
   const t0 = Date.now();
   const docId = run.document_id;
+  await q(`DELETE FROM chunks WHERE document_id=$1`, [docId]); // idempotent re-entry
   const [{ title }] = await q(`SELECT title FROM documents WHERE id=$1`, [docId]);
   const docTitle = title?.value ?? "";
   const secs = await q(`SELECT * FROM sections WHERE document_id=$1 ORDER BY order_index`, [docId]);
