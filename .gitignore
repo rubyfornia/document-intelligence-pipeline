@@ -15,8 +15,9 @@ dist/
 # local corpus documents not cleared for redistribution (cleared seeds live in seed/)
 corpus/local/
 
-# OS noise
+# OS noise / local tooling
 .DS_Store
+.claude/
 .test-build/
 .vercel
 corpus/local/

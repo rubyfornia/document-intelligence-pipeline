@@ -9,7 +9,16 @@ export default function Library() {
   const [docs, setDocs] = useState<Doc[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const stepping = useRef<Set<string>>(new Set());
+
+  // browsers navigate to a dropped file by default — a drop that misses the zone must not eject the app
+  useEffect(() => {
+    const swallow = (e: DragEvent) => e.preventDefault();
+    window.addEventListener("dragover", swallow);
+    window.addEventListener("drop", swallow);
+    return () => { window.removeEventListener("dragover", swallow); window.removeEventListener("drop", swallow); };
+  }, []);
 
   const refresh = useCallback(async () => {
     const r = await fetch("/api/documents"); const j = await r.json();
@@ -44,7 +53,16 @@ export default function Library() {
 
   return (
     <div className="space-y-6">
-      <label className="block cursor-pointer rounded-xl border-2 border-dashed border-gray-300 bg-white p-8 text-center hover:border-brand-400">
+      <label
+        onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={e => {
+          e.preventDefault(); setDragOver(false);
+          if (busy) return;
+          const f = Array.from(e.dataTransfer.files).find(f => f.type === "application/pdf" || /\.pdf$/i.test(f.name));
+          if (f) upload(f); else setErr("Drop a PDF file — that one didn't look like a PDF.");
+        }}
+        className={`block cursor-pointer rounded-xl border-2 border-dashed p-8 text-center ${dragOver ? "border-brand-500 bg-brand-50" : "border-gray-300 bg-white hover:border-brand-400"}`}>
         <input type="file" accept="application/pdf" className="hidden"
                onChange={e => e.target.files?.[0] && upload(e.target.files[0])} />
         <div className="text-gray-700 font-medium">{busy ? `Uploading ${busy}…` : "Drop or choose a PDF to run the pipeline"}</div>
@@ -64,6 +82,18 @@ export default function Library() {
                 <span>{d.totals?.cost_usd != null ? money(d.totals.cost_usd) : ""}</span>
                 <span>{d.totals?.duration_ms != null ? secs(d.totals.duration_ms) : ""}</span>
                 <StatusChip s={d.status} />
+                {d.status === "failed" && (
+                  <button title="resume the run from the stage that failed (state is in the database — a failure costs one step, not the document)"
+                    onClick={async e => {
+                      e.preventDefault(); e.stopPropagation();
+                      const r = await fetch(`/api/documents/${d.id}/retry`, { method: "POST" });
+                      if (!r.ok) setErr((await r.json()).error ?? "retry failed");
+                      refresh();
+                    }}
+                    className="rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-600 hover:border-emerald-500 hover:text-emerald-700">
+                    retry
+                  </button>
+                )}
                 {!d.seed && !d.locked && (
                   <button title="delete this upload (the shipped demo corpus is protected)"
                     onClick={async e => {

@@ -1,13 +1,13 @@
 // The step engine. POST /api/documents/:id/step advances exactly one bounded unit of work.
 // State lives in Postgres; every model call becomes a run_events row — the ledger records
 // what ran, not what was intended.
-import { q } from "./db";
+import { q, db } from "./db";
 import { id } from "./ids";
 import { openDoc, extractPage, rasterPage, docMeta, docOutline } from "./pdf";
 import { triagePage } from "./signals";
 import { detectBoilerplate, headingCandidates, isBoilerplateLine, sanityCheck, type PageLines } from "./structure";
 import { buildChunks, embeddingText, estTokens } from "./chunker";
-import { strictCall, embedBatch, HAIKU } from "./models";
+import { strictCall, embedBatch, HAIKU, isTransientModelError } from "./models";
 import { PAGE_SCHEMA, NORMALIZE_SCHEMA, SUMMARY_SCHEMA } from "./schemas";
 
 const VISION_BUDGET = 150;           // max multimodal calls per document
@@ -56,9 +56,29 @@ const pageLines = async (docId: string, ns: number[]): Promise<PageLines[]> => {
 
 /** Advance the pipeline by one bounded step. Returns progress for the client. */
 export async function step(docId: string) {
+  // One driver at a time. Every open library tab posts /step for a processing document — the
+  // author's tab plus an evaluator's is enough to double-run stages and double-write the ledger.
+  // The advisory lock rides its own connection; it releases in finally, or with the session.
+  const client = await db().connect();
+  let locked = false;
+  try {
+    const r = await client.query(`SELECT pg_try_advisory_lock(hashtext($1)::bigint) AS locked`, [docId]);
+    locked = r.rows[0].locked;
+    if (!locked) return { done: false, status: "processing", contended: true };
+    return await stepLocked(docId);
+  } finally {
+    if (locked) await client.query(`SELECT pg_advisory_unlock(hashtext($1)::bigint)`, [docId]);
+    client.release();
+  }
+}
+
+async function stepLocked(docId: string) {
   const [run] = await q<Run>(`SELECT * FROM runs WHERE document_id=$1 ORDER BY started_at DESC LIMIT 1`, [docId]);
   if (!run) throw new Error("no run");
   if (run.status !== "processing") return { stage: run.stage, done: true, status: run.status };
+  // a transient-error backoff may be in force — wait it out; polling a waiting run costs nothing
+  if (run.cursor.retry_at && Date.now() < run.cursor.retry_at)
+    return { stage: run.stage, done: false, status: "processing", waiting_ms: run.cursor.retry_at - Date.now() };
   const t0 = Date.now();
   try {
     switch (run.stage) {
@@ -73,14 +93,32 @@ export async function step(docId: string) {
       case "finalize":  await stFinalize(run); break;
       default: throw new Error(`unknown stage ${run.stage}`);
     }
+    if (run.cursor.retry_at != null || run.cursor.transient != null) {
+      // a step just succeeded — the provider recovered; drop the backoff state
+      const { retry_at, transient, ...rest } = run.cursor;
+      await setCursor(run, run.stage, rest);
+    }
   } catch (e: any) {
-    await ev(run, run.stage, { note: `STEP ERROR: ${String(e?.message ?? e).slice(0, 300)}`, ms: Date.now() - t0 });
+    const msg = String(e?.message ?? e);
+    if (isTransientModelError(msg)) {
+      // Rate limits and provider blips are weather, not defects. A per-minute quota outlives any
+      // sleep a serverless invocation can afford, so the wait lives in the cursor, across steps —
+      // bounded at 8 attempts, and every wait is a ledger row.
+      const n = (run.cursor.transient ?? 0) + 1;
+      if (n <= 8) {
+        const waitMs = Math.min(20_000 * n, 90_000);
+        await ev(run, run.stage, { note: `RATE_LIMITED (attempt ${n}/8, backing off ${Math.round(waitMs / 1000)}s): ${msg.slice(0, 160)}`, ms: Date.now() - t0 });
+        await setCursor(run, run.stage, { ...run.cursor, transient: n, retry_at: Date.now() + waitMs });
+        return { stage: run.stage, done: false, status: "processing", backoff_ms: waitMs };
+      }
+    }
+    await ev(run, run.stage, { note: `STEP ERROR: ${msg.slice(0, 300)}`, ms: Date.now() - t0 });
     const key = `err_${run.stage}`;
     const errs = (run.cursor[key] ?? 0) + 1;
     if (errs >= 3) {
       await q(`UPDATE runs SET status='failed', finished_at=now() WHERE id=$1`, [run.id]);
-      await q(`UPDATE documents SET status='failed', error=$2 WHERE id=$1`, [run.document_id, String(e?.message ?? e).slice(0, 500)]);
-      return { stage: run.stage, done: true, status: "failed", error: String(e?.message ?? e).slice(0, 200) };
+      await q(`UPDATE documents SET status='failed', error=$2 WHERE id=$1`, [run.document_id, msg.slice(0, 500)]);
+      return { stage: run.stage, done: true, status: "failed", error: msg.slice(0, 200) };
     }
     await setCursor(run, run.stage, { ...run.cursor, [key]: errs });
     return { stage: run.stage, done: false, status: "processing", retried: true };
@@ -135,6 +173,7 @@ async function stTriage(run: Run) {
   const t0 = Date.now();
   const { doc } = await loadPdf(run.document_id);
   const total = doc.countPages();
+  await q(`DELETE FROM elements WHERE document_id=$1 AND source='deterministic'`, [run.document_id]); // idempotent re-triage
   const counts: Record<string, number> = {};
   for (let n = 1; n <= total; n++) {
     const [existing] = await q(`SELECT class FROM pages WHERE document_id=$1 AND n=$2`, [run.document_id, n]);
@@ -145,6 +184,16 @@ async function stTriage(run: Run) {
     const flags = t.reason.includes("distrust-text") ? ["distrust-text"] : [];
     await q(`UPDATE pages SET class=$3, reason=$4, route=$5, signals=$6, flags=$7 WHERE document_id=$1 AND n=$2`,
       [run.document_id, n, t.class, t.reason, t.route, JSON.stringify(t.signals), flags]);
+    if (t.route === "deterministic") {
+      // raster images the content stream already measures become figure elements for free —
+      // measured provenance, zero model calls. (Vector drawings remain the documented gap;
+      // vision-routed pages get their figures from the model instead.)
+      const area = Math.max(p.width * p.height, 1);
+      for (const b of p.imageBoxes.filter(b => (b.w * b.h) / area >= 0.03).slice(0, 8))
+        await q(`INSERT INTO elements (id, document_id, page_n, type, bbox, source, bbox_source)
+                 VALUES ($1,$2,$3,'figure',$4,'deterministic','measured')`,
+          [id("fig"), run.document_id, n, JSON.stringify({ x: b.x / (p.width || 1), y: b.y / (p.height || 1), w: b.w / (p.width || 1), h: b.h / (p.height || 1) })]);
+    }
   }
   const scanShare = ((counts.C ?? 0) + (counts.D ?? 0)) / Math.max(total, 1);
   if (scanShare > 0.4) await warn(run.document_id, "SCAN_HEAVY", `${Math.round(scanShare * 100)}% of pages are scanned/degraded; structure fidelity is OCR-limited`);
@@ -282,7 +331,7 @@ async function stStructure(run: Run) {
   // outline prior
   const { doc } = await loadPdf(docId);
   const outline = docOutline(doc);
-  let sections: { title: string; level: number; page: number; source: string; confidence: number; lineIdx?: number }[];
+  let sections: { title: string; level: number; page: number; source: string; confidence: number; lineIdx?: number; endOverride?: number }[];
   if (outline.length >= 2) {
     sections = outline.map(o => ({ title: o.title, level: Math.min(o.level, 4), page: o.page, source: "outline", confidence: 0.95 }));
     if (cands.length && Math.abs(cands.length - outline.length) / Math.max(outline.length, 1) > 0.5)
@@ -307,6 +356,15 @@ async function stStructure(run: Run) {
   } else sections = [];
   if (!sections.length) sections = [{ title: "Document", level: 1, page: 1, source: "fallback", confidence: 0.3 }];
 
+  // content on pages before the first section — a cover blurb, an intro passage — is front
+  // matter: a block no section claims never reaches a chunk, and dropped text is a coverage
+  // hole downstream can't see. Synthesized only when real (non-boilerplate) blocks exist there.
+  const firstStart = Math.min(...sections.map(s => s.page));
+  if (firstStart > 1) {
+    const [orphan] = await q(`SELECT 1 AS x FROM blocks WHERE document_id=$1 AND page_n < $2 AND NOT boilerplate LIMIT 1`, [docId, firstStart]);
+    if (orphan) sections.unshift({ title: "Front matter", level: 1, page: 1, source: "fallback", confidence: 0.5, endOverride: firstStart - 1 });
+  }
+
   // build tree rows with page ranges
   const total = (await q(`SELECT page_count c FROM documents WHERE id=$1`, [docId]))[0].c;
   const stack: { id: string; level: number }[] = [];
@@ -317,7 +375,7 @@ async function stStructure(run: Run) {
     while (stack.length && stack[stack.length - 1].level >= s.level) stack.pop();
     await q(`INSERT INTO sections (id, document_id, parent_id, level, title, page_start, page_end, order_index, source, confidence)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-      [sid, docId, stack[stack.length - 1]?.id ?? null, s.level, s.title.slice(0, 200), s.page, (next?.page ?? total) , i, s.source, s.confidence]);
+      [sid, docId, stack[stack.length - 1]?.id ?? null, s.level, s.title.slice(0, 200), s.page, (s.endOverride ?? next?.page ?? total), i, s.source, s.confidence]);
     stack.push({ id: sid, level: s.level });
   }
   // slide-deck pages become their own sections if no structure found for them
@@ -373,6 +431,12 @@ async function stChunk(run: Run) {
   for (const e of els) {
     const [sec] = await q(`SELECT id, title FROM sections WHERE document_id=$1 AND page_start<=$2 AND page_end>=$2 ORDER BY level DESC LIMIT 1`, [docId, e.page_n]);
     const text = [e.caption, e.description, e.grid ? `columns: ${(e.grid.columns ?? []).join(", ")}` : ""].filter(Boolean).join("\n");
+    if (!text.trim() && e.source === "deterministic") {
+      // a caption-less measured figure is structure/provenance data, not retrieval content —
+      // it stays in the representation's elements; an empty embedding would only add noise
+      await q(`UPDATE elements SET section_id=$2 WHERE id=$1`, [e.id, sec?.id ?? null]);
+      continue;
+    }
     const cid = id("chk");
     await q(`INSERT INTO chunks (id, document_id, section_id, content_type, order_index, breadcrumb, text, embedding_text, tokens, page_start, page_end, element_id, provenance)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11,$12)`,

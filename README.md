@@ -103,7 +103,15 @@ budget blowout (`partial` + coverage); malformed model output (strict schemas �
 honest failure); **provider content filtering** — verbatim OCR of book-like pages can trip a
 recitation guard; the pipeline retries once with document context, then keeps the page as image
 with a named `CONTENT_FILTER` warning. Boilerplate that carries value (a DOI in a running header)
-is excluded from chunks but preserved and inspectable.
+is excluded from chunks but preserved and inspectable. **Provider rate limits** (a per-minute
+embedding quota once killed a run mid-pipeline) are weather, not defects: the run backs off across
+steps — the wait lives in the cursor, every wait is a ledger row, bounded at 8 attempts — and a run
+that still fails keeps a **retry** button that resumes from the failed stage, because the state was
+in Postgres all along. Two clients stepping the same document (the author's tab plus an evaluator's)
+are fenced by a per-document advisory lock, so stages cannot double-run or double-write the ledger.
+Content ahead of the first outline heading becomes a `Front matter` section instead of silently
+falling outside every chunk, and raster images on deterministic pages are recorded as
+measured-coordinate figure elements at triage time, for free.
 
 ## Tradeoffs and honest limitations
 

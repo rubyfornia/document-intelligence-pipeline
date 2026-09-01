@@ -17,6 +17,10 @@ export function costUSD(model: string, inTok: number, outTok: number): number {
 let _client: Anthropic | null = null;
 const client = () => (_client ??= new Anthropic());
 
+/** Errors that deserve a wait, not a strike: rate limits, quota windows, provider blips. */
+export const isTransientModelError = (msg: string): boolean =>
+  /\b(429|529|quota|rate.?limit|too many requests|overloaded|resource.?exhausted|service unavailable|econnreset|etimedout|fetch failed|socket hang up)\b/i.test(msg);
+
 export interface ToolCallResult<T> {
   ok: boolean; data?: T; error?: string;
   model: string; inputTokens: number; outputTokens: number; ms: number; costUsd: number;
