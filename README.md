@@ -136,9 +136,13 @@ user correction of headings/regions feeding back into the representation; per-te
 
 ## Running locally
 
+The deployed instance sits behind a shared passcode (it is in the delivery note): pages redirect to
+`/signin`, the API answers 401, and a session lasts three hours. Scripts present the passcode as an
+`x-passcode` header. The value lives only in `SITE_PASSCODE`; unset, the instance stays closed.
+
 ```bash
 npm install
-cp .env.example .env.local   # ANTHROPIC_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY, DATABASE_URL
+# create .env.local with: ANTHROPIC_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY, DATABASE_URL, SITE_PASSCODE
 npm run db:schema                 # create the tables in an empty database
 npm run dev                       # http://localhost:3000 — the library starts empty
 npm run seed -- http://localhost:3000        # upload + process the committed corpus/seed PDFs
