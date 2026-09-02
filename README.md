@@ -13,7 +13,7 @@ tables, chunks with provenance, and summaries — with a UI whose job is to make
 (char count, garbage ratio, image coverage, column clusters, font distribution); only pages that
 determinism cannot serve are rasterized and sent to a vision model. Claude Haiku 4.5 handles every
 generative call; Sonnet 5 exists as a single escalation path, triggered by evidence (schema failure
-twice, or self-reported low confidence) — never pre-assigned by document type. The assignment asks
+twice; self-reported low confidence is surfaced as a warning, not escalated) — never pre-assigned by document type. The assignment asks
 whether every page should go through an expensive multimodal model: the answer implemented here is
 that **routing pages is the architecture**, and the per-page ledger is its proof.
 
