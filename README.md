@@ -157,6 +157,3 @@ on its own cover: https://doi.org/10.6028/NIST.AI.100-1) and pass it to the seed
 `npm run seed -- http://localhost:3000 path/to/nist-ai-rmf.pdf`. A fresh boot reproduces the corpus
 and its planted-truth conclusions; the ledgers it writes are its own new measurements — a ledger
 records what ran, so a new run gets new receipts.
-
-```bash
-```

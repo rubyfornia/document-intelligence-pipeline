@@ -24,12 +24,13 @@ The README and all committed docs are authored fresh from the build.
 ## Decided stack (do not relitigate without new evidence)
 
 - Next.js 14 + TypeScript + Tailwind + Radix + Tremor, deployed on Vercel.
-- **mupdf (WASM)** for extraction and rasterization; fallback `pdfjs-dist` + `@napi-rs/canvas`
-  — the call is made in phase 1 and recorded.
-- Postgres (Neon) + pgvector; Vercel Blob for PDFs, page rasters, crops.
+- **mupdf (WASM)** for extraction and rasterization — the sole PDF engine; no native-binary
+  fallback was needed.
+- Postgres (Neon) + pgvector; PDFs stored as bytes, page images and crops rendered on demand
+  (no separate blob store to keep in sync).
 - **Claude Haiku 4.5 (`claude-haiku-4-5`) for every generative call; Sonnet 5
-  (`claude-sonnet-5`) as the single escalation path**, triggered by evidence only. Voyage
-  `voyage-4-lite` embeddings. **Strict structured outputs on every model call.**
+  (`claude-sonnet-5`) as the single escalation path**, triggered by evidence only. Gemini
+  `gemini-embedding-001` (768-dim) embeddings. **Strict structured outputs on every model call.**
 - Pipeline runs as a step function (`POST /api/documents/:id/step`) with state in Postgres;
   a client polling hook drives it. No queue service.
 
